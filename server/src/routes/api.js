@@ -129,9 +129,11 @@ export function registerApiRoutes(app, { supabaseServer }) {
   router.get("/guilds", async (req, res, next) => {
     try {
       const myUserId = req.authUser.id;
-      const rpc = await supabaseServer.rpc("list_my_guild_memberships");
-      if (rpc.error) throw createError(500, rpc.error.message);
-      const memberships = (rpc.data || []).map((r) => ({ guild_id: r.guild_id, role: r.role }));
+      const { data: memberships, error: mErr } = await supabaseServer
+        .from("guild_members")
+        .select("guild_id, role")
+        .eq("user_id", myUserId);
+      if (mErr) throw createError(500, mErr.message);
       const guildIds = [...new Set(memberships.map((m) => m.guild_id).filter(Boolean))];
       const roleByGuild = new Map(memberships.map((m) => [m.guild_id, m.role]));
       let guilds = [];
@@ -211,9 +213,31 @@ export function registerApiRoutes(app, { supabaseServer }) {
 
   router.post("/guilds/invites/:inviteId/accept", async (req, res, next) => {
     try {
+      const myUserId = req.authUser.id;
       const inviteId = String(req.params.inviteId || "");
-      const { error } = await supabaseServer.rpc("accept_guild_invite", { p_invite_id: inviteId });
-      if (error) throw createError(400, error.message);
+      if (!inviteId) throw createError(400, "Paramètres invalides.");
+
+      const { data: inviteRow, error: acceptErr } = await supabaseServer
+        .from("guild_invites")
+        .update({ status: "accepted" })
+        .eq("id", inviteId)
+        .eq("invitee_id", myUserId)
+        .eq("status", "pending")
+        .select("guild_id")
+        .maybeSingle();
+      if (acceptErr) throw createError(400, acceptErr.message);
+      if (!inviteRow?.guild_id) throw createError(404, "Invitation introuvable.");
+
+      const { error: memberErr } = await supabaseServer.from("guild_members").upsert(
+        {
+          guild_id: inviteRow.guild_id,
+          user_id: myUserId,
+          role: "member",
+        },
+        { onConflict: "guild_id,user_id", ignoreDuplicates: true }
+      );
+      if (memberErr) throw createError(400, memberErr.message);
+
       res.json({ ok: true });
     } catch (e) {
       next(e);

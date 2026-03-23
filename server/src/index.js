@@ -346,10 +346,22 @@ async function fetchGuildMessageHistory(channelId) {
 }
 
 function buildPresenceList() {
-  const users = [];
+  const byClient = new Map();
   for (const [socketId, profile] of identities.entries()) {
-    users.push({ socketId: socketId, ...profile });
+    const key =
+      typeof profile?.clientId === "string" && profile.clientId.trim()
+        ? profile.clientId
+        : socketId;
+    if (!byClient.has(key)) {
+      byClient.set(key, { socketId, ...profile });
+      continue;
+    }
+    const prev = byClient.get(key);
+    if (!prev?.avatarUrl && profile?.avatarUrl) {
+      byClient.set(key, { ...prev, socketId, ...profile });
+    }
   }
+  const users = [...byClient.values()];
   users.sort((a, b) =>
     a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
   );
