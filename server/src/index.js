@@ -271,12 +271,8 @@ function sanitizeAvatarUrl(raw) {
 
 io.on("connection", (socket) => {
   guildIdBySocket.set(socket.id, null);
-  socket.emit("channels:config", {
-    guildId: null,
-    text: TEXT_CHANNELS,
-    voice: VOICE_CHANNELS,
-    myRole: null,
-  });
+  // Pas de channels:config ici : le client envoie guild:select (null ou uuid) pour éviter
+  // d’écraser l’espace privé choisi à chaque reconnexion.
   socket.emit("presence:update", { users: buildPresenceList() });
 
   socket.on("identity:set", (payload) => {

@@ -63,27 +63,32 @@ export function usePrivateGuilds(enabled, userId) {
         .select("id, guild_id, invited_by, guilds(name)")
         .eq("invitee_id", userId)
         .eq("status", "pending");
-      if (iErr) throw iErr;
 
-      const inviterIds = [...new Set((invites || []).map((i) => i.invited_by).filter(Boolean))];
-      let nameById = new Map();
-      if (inviterIds.length) {
-        const { data: profs, error: pErr } = await supabase
-          .from("profiles")
-          .select("id, display_name")
-          .in("id", inviterIds);
-        if (pErr) throw pErr;
-        nameById = new Map((profs || []).map((p) => [p.id, p.display_name || "Utilisateur"]));
+      if (iErr) {
+        console.warn("guild_invites load", iErr.message);
+        setIncomingInvites([]);
+      } else {
+        const inviterIds = [...new Set((invites || []).map((i) => i.invited_by).filter(Boolean))];
+        let nameById = new Map();
+        if (inviterIds.length) {
+          const { data: profs, error: pErr } = await supabase
+            .from("profiles")
+            .select("id, display_name")
+            .in("id", inviterIds);
+          if (!pErr && profs) {
+            nameById = new Map((profs || []).map((p) => [p.id, p.display_name || "Utilisateur"]));
+          }
+        }
+
+        setIncomingInvites(
+          (invites || []).map((i) => ({
+            id: i.id,
+            guildId: i.guild_id,
+            guildName: i.guilds?.name || "Serveur",
+            inviterName: nameById.get(i.invited_by) || "Quelqu’un",
+          }))
+        );
       }
-
-      setIncomingInvites(
-        (invites || []).map((i) => ({
-          id: i.id,
-          guildId: i.guild_id,
-          guildName: i.guilds?.name || "Serveur",
-          inviterName: nameById.get(i.invited_by) || "Quelqu’un",
-        }))
-      );
     } catch (e) {
       const missing = isGuildTablesMissingError(e);
       setGuildTablesMissing(missing);

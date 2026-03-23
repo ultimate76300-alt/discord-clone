@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { loadIdentity } from "./lib/identity";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -26,6 +26,23 @@ import { DmChatView } from "./components/DmChatView";
 
 const DEFAULT_TEXT = ["general", "random", "dev", "off-topic"];
 const DEFAULT_VOICE = ["Lobby", "Gaming", "Study"];
+
+const LAST_GUILD_STORAGE_KEY = "atomvoice:lastGuildCtx";
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function readStoredGuildIdForUser(userId) {
+  if (!userId || typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LAST_GUILD_STORAGE_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (j?.u !== userId || typeof j?.g !== "string" || !UUID_RE.test(j.g)) return null;
+    return j.g;
+  } catch {
+    return null;
+  }
+}
 
 /** Production must not use a localhost URL baked at build time (common Railway misconfig). */
 function socketBaseUrl() {
@@ -58,6 +75,7 @@ export default function App() {
   const [createGuildOpen, setCreateGuildOpen] = useState(false);
   const [manageGuildOpen, setManageGuildOpen] = useState(false);
   const activeGuildIdRef = useRef(null);
+  const lastGuildHydratedUserRef = useRef(null);
   const [selectedTextId, setSelectedTextId] = useState("general");
   const [mainPane, setMainPane] = useState("text");
   const [connectedVoiceId, setConnectedVoiceId] = useState(null);
@@ -121,6 +139,7 @@ export default function App() {
     guilds: privateGuildsList,
     incomingInvites: guildIncomingInvites,
     guildTablesMissing,
+    loading: guildsLoading,
     createGuild,
     sendGuildInvite,
     acceptGuildInvite,
@@ -129,6 +148,55 @@ export default function App() {
   } = usePrivateGuilds(Boolean(useSupabaseAuth && myUserId), myUserId);
 
   activeGuildIdRef.current = activeGuildId;
+
+  useLayoutEffect(() => {
+    if (!useSupabaseAuth || !myUserId) {
+      lastGuildHydratedUserRef.current = null;
+      return;
+    }
+    if (lastGuildHydratedUserRef.current === myUserId) return;
+    lastGuildHydratedUserRef.current = myUserId;
+    const stored = readStoredGuildIdForUser(myUserId);
+    setActiveGuildId(stored);
+  }, [useSupabaseAuth, myUserId]);
+
+  useEffect(() => {
+    if (!useSupabaseAuth || !myUserId) return;
+    try {
+      if (activeGuildId) {
+        localStorage.setItem(LAST_GUILD_STORAGE_KEY, JSON.stringify({ u: myUserId, g: activeGuildId }));
+      } else {
+        localStorage.removeItem(LAST_GUILD_STORAGE_KEY);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [useSupabaseAuth, myUserId, activeGuildId]);
+
+  useEffect(() => {
+    if (!useSupabaseAuth || !session?.user) {
+      try {
+        localStorage.removeItem(LAST_GUILD_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+      lastGuildHydratedUserRef.current = null;
+    }
+  }, [useSupabaseAuth, session?.user]);
+
+  useEffect(() => {
+    if (!myUserId || guildsLoading || guildTablesMissing) return;
+    if (!activeGuildId) return;
+    if (privateGuildsList.length === 0) return;
+    if (!privateGuildsList.some((g) => g.id === activeGuildId)) {
+      setActiveGuildId(null);
+      try {
+        localStorage.removeItem(LAST_GUILD_STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [myUserId, guildsLoading, guildTablesMissing, activeGuildId, privateGuildsList]);
 
   const dmActive = Boolean(useSupabaseAuth && mainPane === "dm" && selectedDmPeerId);
   const { messages: dmMessages, loading: dmLoading, error: dmError, ready: dmReady, sendMessage: sendDmMessage } =
@@ -198,8 +266,7 @@ export default function App() {
     };
     const onChannelsConfig = (res) => {
       setMessages([]);
-      const gid = res?.guildId ?? null;
-      setActiveGuildId(gid);
+      // Ne pas écraser activeGuildId : la sélection vient du client (sidebar / localStorage).
       setMyGuildRole(res?.myRole ?? null);
       const t = normalizeChannelList(res?.text);
       const v = normalizeChannelList(res?.voice);

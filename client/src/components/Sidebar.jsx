@@ -61,21 +61,9 @@ export function Sidebar({
         {friendsEnabled ? (
           <>
             <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
-              Espaces
+              Public
             </div>
-            {guildTablesMissing ? (
-              <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-950/35 px-2 py-2 text-[11px] leading-snug text-amber-100/95">
-                <p className="font-semibold text-amber-200">Serveurs privés non configurés</p>
-                <p className="mt-1 text-amber-100/85">
-                  Dans <strong>Supabase</strong> → <strong>SQL Editor</strong>, exécute tout le fichier{" "}
-                  <code className="rounded bg-black/35 px-1 font-mono text-[10px]">private-guilds.sql</code>{" "}
-                  (dossier <code className="rounded bg-black/35 px-1 font-mono text-[10px]">supabase/</code> du
-                  projet), après <code className="rounded bg-black/35 px-1 font-mono text-[10px]">friends-dm.sql</code>
-                  . Puis recharge cette page.
-                </p>
-              </div>
-            ) : null}
-            <div className="mb-3 space-y-0.5 rounded-md bg-discord-card/60 px-1 py-1 ring-1 ring-discord-border/60">
+            <div className="mb-3 rounded-md bg-discord-card/60 px-1 py-1 ring-1 ring-discord-border/60">
               <button
                 type="button"
                 onClick={() => onSelectPublicLobby?.()}
@@ -90,41 +78,68 @@ export function Sidebar({
                 </span>
                 <span className="truncate">Lobby public</span>
               </button>
-              {privateGuilds.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => onSelectPrivateGuild?.(g.id)}
-                  className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
-                    activeGuildId === g.id
-                      ? "bg-discord-hover text-discord-text"
-                      : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
-                  }`}
-                >
-                  <span className="mr-2 shrink-0" aria-hidden>
-                    🔒
-                  </span>
-                  <span className="truncate">{g.name}</span>
-                </button>
-              ))}
-              <button
-                type="button"
-                disabled={guildTablesMissing}
-                onClick={() => onOpenCreateGuild?.()}
-                className="mt-0.5 w-full rounded border border-dashed border-discord-border px-2 py-1.5 text-left text-[11px] text-discord-muted hover:border-discord-accent/60 hover:text-discord-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                + Créer un serveur privé
-              </button>
-              {activeGuildId && (myGuildRole === "owner" || myGuildRole === "admin") ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenManageGuild?.()}
-                  className="w-full rounded px-2 py-1.5 text-left text-[11px] text-discord-text hover:bg-discord-hover"
-                >
-                  Gérer (invitations · admins · exclusions)
-                </button>
-              ) : null}
             </div>
+
+            <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
+              Serveurs privés
+            </div>
+            <p className="mb-2 px-2 text-[10px] leading-snug text-discord-muted">
+              Seuls les serveurs dont tu es membre apparaissent ici ; ils restent listés même quand tu es sur le lobby
+              public.
+            </p>
+            {guildTablesMissing ? (
+              <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-950/35 px-2 py-2 text-[11px] leading-snug text-amber-100/95">
+                <p className="font-semibold text-amber-200">Base non installée</p>
+                <p className="mt-1 text-amber-100/85">
+                  Dans <strong>Supabase</strong> → <strong>SQL Editor</strong>, exécute{" "}
+                  <code className="rounded bg-black/35 px-1 font-mono text-[10px]">private-guilds.sql</code> puis
+                  recharge.
+                </p>
+              </div>
+            ) : (
+              <div className="mb-3 space-y-0.5 rounded-md bg-discord-card/60 px-1 py-1 ring-1 ring-discord-border/60">
+                {privateGuilds.length === 0 ? (
+                  <p className="px-2 py-2 text-[11px] text-discord-muted">
+                    Aucun serveur pour l’instant — crée-en un ou accepte une invitation.
+                  </p>
+                ) : (
+                  privateGuilds.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => onSelectPrivateGuild?.(g.id)}
+                      className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
+                        activeGuildId === g.id
+                          ? "bg-discord-hover text-discord-text"
+                          : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
+                      }`}
+                    >
+                      <span className="mr-2 shrink-0" aria-hidden>
+                        🔒
+                      </span>
+                      <span className="truncate">{g.name}</span>
+                    </button>
+                  ))
+                )}
+                <button
+                  type="button"
+                  disabled={guildTablesMissing}
+                  onClick={() => onOpenCreateGuild?.()}
+                  className="mt-0.5 w-full rounded border border-dashed border-discord-border px-2 py-1.5 text-left text-[11px] text-discord-muted hover:border-discord-accent/60 hover:text-discord-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  + Créer un serveur privé
+                </button>
+                {activeGuildId && (myGuildRole === "owner" || myGuildRole === "admin") ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenManageGuild?.()}
+                    className="w-full rounded px-2 py-1.5 text-left text-[11px] text-discord-text hover:bg-discord-hover"
+                  >
+                    Gérer ce serveur
+                  </button>
+                ) : null}
+              </div>
+            )}
 
             {incomingGuildInvites.length > 0 ? (
               <div className="mb-3 rounded-md border border-discord-border bg-discord-elevated/50 px-2 py-2">
