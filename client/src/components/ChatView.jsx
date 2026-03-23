@@ -5,6 +5,7 @@ import { EmojiPicker } from "./EmojiPicker";
 
 export function ChatView({
   channelId,
+  channelTitle,
   messages,
   connected,
   connectionError,
@@ -32,7 +33,9 @@ export function ChatView({
     <div className="flex min-h-0 flex-1 flex-col bg-discord-bg">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-discord-border bg-discord-elevated px-4">
         <span className="shrink-0 text-lg text-discord-muted">#</span>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-bold text-discord-text">{channelId}</h2>
+        <h2 className="min-w-0 flex-1 truncate text-sm font-bold text-discord-text">
+          {channelTitle ?? channelId}
+        </h2>
         {headerTrailing ? <div className="shrink-0">{headerTrailing}</div> : null}
       </header>
 

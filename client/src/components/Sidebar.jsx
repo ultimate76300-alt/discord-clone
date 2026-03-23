@@ -30,6 +30,17 @@ export function Sidebar({
   onAcceptRequest,
   onDeclineRequest,
   onCancelOutgoing,
+  serverSubtitle = "Lobby public",
+  activeGuildId = null,
+  myGuildRole = null,
+  privateGuilds = [],
+  incomingGuildInvites = [],
+  onSelectPublicLobby,
+  onSelectPrivateGuild,
+  onOpenCreateGuild,
+  onOpenManageGuild,
+  onAcceptGuildInvite,
+  onDeclineGuildInvite,
 }) {
   const [friendInput, setFriendInput] = useState("");
 
@@ -41,13 +52,103 @@ export function Sidebar({
         </div>
         <div className="ml-2 min-w-0">
           <div className="truncate text-sm font-semibold text-discord-text">AtomVoice</div>
-          <div className="truncate text-xs text-discord-muted">Public lobby</div>
+          <div className="truncate text-xs text-discord-muted">{serverSubtitle}</div>
         </div>
       </div>
 
       <nav className="scroll-discord flex-1 overflow-y-auto px-2 py-3">
         {friendsEnabled ? (
           <>
+            <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
+              Espaces
+            </div>
+            <div className="mb-3 space-y-0.5 rounded-md bg-discord-card/60 px-1 py-1 ring-1 ring-discord-border/60">
+              <button
+                type="button"
+                onClick={() => onSelectPublicLobby?.()}
+                className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
+                  activeGuildId == null
+                    ? "bg-discord-hover text-discord-text"
+                    : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
+                }`}
+              >
+                <span className="mr-2 shrink-0" aria-hidden>
+                  🌐
+                </span>
+                <span className="truncate">Lobby public</span>
+              </button>
+              {privateGuilds.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => onSelectPrivateGuild?.(g.id)}
+                  className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
+                    activeGuildId === g.id
+                      ? "bg-discord-hover text-discord-text"
+                      : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
+                  }`}
+                >
+                  <span className="mr-2 shrink-0" aria-hidden>
+                    🔒
+                  </span>
+                  <span className="truncate">{g.name}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => onOpenCreateGuild?.()}
+                className="mt-0.5 w-full rounded border border-dashed border-discord-border px-2 py-1.5 text-left text-[11px] text-discord-muted hover:border-discord-accent/60 hover:text-discord-accent"
+              >
+                + Créer un serveur privé
+              </button>
+              {activeGuildId && (myGuildRole === "owner" || myGuildRole === "admin") ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenManageGuild?.()}
+                  className="w-full rounded px-2 py-1.5 text-left text-[11px] text-discord-text hover:bg-discord-hover"
+                >
+                  Gérer (invitations · admins · exclusions)
+                </button>
+              ) : null}
+            </div>
+
+            {incomingGuildInvites.length > 0 ? (
+              <div className="mb-3 rounded-md border border-discord-border bg-discord-elevated/50 px-2 py-2">
+                <p className="px-0.5 text-[10px] font-semibold uppercase text-discord-muted">
+                  Invitations serveur
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {incomingGuildInvites.map((inv) => (
+                    <li
+                      key={inv.id}
+                      className="flex flex-col gap-1 rounded bg-discord-input/40 px-2 py-1.5"
+                    >
+                      <span className="truncate text-xs text-discord-text">
+                        <span className="text-discord-muted">{inv.inviterName}</span> →{" "}
+                        <span className="font-medium">{inv.guildName}</span>
+                      </span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onAcceptGuildInvite?.(inv.id)}
+                          className="flex-1 rounded bg-discord-green/90 py-0.5 text-[11px] font-medium text-white"
+                        >
+                          Rejoindre
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeclineGuildInvite?.(inv.id)}
+                          className="flex-1 rounded border border-discord-border py-0.5 text-[11px] text-discord-muted"
+                        >
+                          Refuser
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
               Amis & MP
             </div>
@@ -174,49 +275,57 @@ export function Sidebar({
           Text channels
         </div>
         <ul className="space-y-0.5">
-          {textChannels.map((id) => (
-            <li key={id}>
-              <button
-                type="button"
-                onClick={() => onSelectText(id)}
-                className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
-                  mainPane === "text" && selectedTextId === id
-                    ? "bg-discord-hover text-discord-text"
-                    : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
-                }`}
-              >
-                <ChannelIcon hash />
-                <span className="truncate">{id}</span>
-              </button>
-            </li>
-          ))}
+          {textChannels.map((c) => {
+            const id = typeof c === "string" ? c : c.id;
+            const label = typeof c === "string" ? c : c.name;
+            return (
+              <li key={id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectText(id)}
+                  className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
+                    mainPane === "text" && selectedTextId === id
+                      ? "bg-discord-hover text-discord-text"
+                      : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
+                  }`}
+                >
+                  <ChannelIcon hash />
+                  <span className="truncate">{label}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
 
         <div className="mb-1 mt-4 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
           Voice channels
         </div>
         <ul className="space-y-0.5">
-          {voiceChannels.map((id) => (
-            <li key={id}>
-              <button
-                type="button"
-                onClick={() => onSelectVoice(id)}
-                className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
-                  mainPane === "voice" && connectedVoiceId === id
-                    ? "bg-discord-hover text-discord-text"
-                    : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
-                }`}
-              >
-                <ChannelIcon />
-                <span className="truncate">{id}</span>
-                {connectedVoiceId === id && (
-                  <span className="ml-auto text-[10px] font-semibold uppercase text-discord-green">
-                    Live
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
+          {voiceChannels.map((c) => {
+            const id = typeof c === "string" ? c : c.id;
+            const label = typeof c === "string" ? c : c.name;
+            return (
+              <li key={id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectVoice(id)}
+                  className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
+                    mainPane === "voice" && connectedVoiceId === id
+                      ? "bg-discord-hover text-discord-text"
+                      : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
+                  }`}
+                >
+                  <ChannelIcon />
+                  <span className="truncate">{label}</span>
+                  {connectedVoiceId === id && (
+                    <span className="ml-auto text-[10px] font-semibold uppercase text-discord-green">
+                      Live
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 

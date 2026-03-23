@@ -5,6 +5,11 @@ import {
   SCREEN_SHARE_PRESETS,
   screenPresetTargetFramerate,
 } from "../lib/voiceSettings";
+import {
+  playVoiceJoinChime,
+  playVoiceLeaveChime,
+  playVoiceSelfJoinChime,
+} from "../lib/voiceChimes";
 
 function tuneVideoTrackContentHint(track) {
   if (!track || track.kind !== "video") return;
@@ -103,6 +108,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   const rawMicStreamRef = useRef(null);
   const lastScreenPresetRef = useRef("720p30");
   const flushOutboundVideoEncodingsRef = useRef(() => {});
+  const selfJoinChimePlayedRef = useRef(false);
 
   const micConstraintKey = useMemo(
     () =>
@@ -397,6 +403,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
 
   useEffect(() => {
     voiceChannelRef.current = voiceChannelId;
+    selfJoinChimePlayedRef.current = false;
   }, [voiceChannelId]);
 
   useEffect(() => {
@@ -429,6 +436,10 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
 
     const onPeers = ({ channelId, peers }) => {
       if (channelId !== voiceChannelRef.current) return;
+      if (!selfJoinChimePlayedRef.current) {
+        selfJoinChimePlayedRef.current = true;
+        void playVoiceSelfJoinChime();
+      }
       const myId = socket.id;
       for (const p of peers) {
         setPeerMeta((prev) => {
@@ -449,6 +460,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
 
     const onPeerJoined = ({ channelId, peer }) => {
       if (channelId !== voiceChannelRef.current) return;
+      void playVoiceJoinChime();
       const myId = socket.id;
       setPeerMeta((prev) => {
         const next = new Map(prev);
@@ -466,6 +478,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
     };
 
     const onPeerLeft = ({ socketId }) => {
+      void playVoiceLeaveChime();
       cleanupPeer(socketId);
     };
 

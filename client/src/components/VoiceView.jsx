@@ -179,6 +179,7 @@ function VideoTile({
 
 export function VoiceView({
   channelId,
+  channelTitle,
   profile,
   localStreamRef,
   localRenderTick,
@@ -245,7 +246,7 @@ export function VoiceView({
       <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-discord-border bg-discord-elevated px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-lg">🔊</span>
-          <h2 className="text-sm font-bold text-discord-text">{channelId}</h2>
+          <h2 className="text-sm font-bold text-discord-text">{channelTitle ?? channelId}</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-xs text-discord-muted">
