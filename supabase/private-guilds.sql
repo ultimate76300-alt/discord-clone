@@ -19,6 +19,11 @@ create table if not exists public.guilds (
   created_at timestamptz not null default now()
 );
 
+-- Colonnes optionnelles pour l’icône d’un serveur privé (client AtomVoice).
+-- À garder ici pour que le “logo à la création” fonctionne même sur une base existante.
+alter table public.guilds add column if not exists icon_url text;
+alter table public.guilds add column if not exists icon_brand_key text;
+
 create table if not exists public.guild_members (
   guild_id uuid not null references public.guilds (id) on delete cascade,
   user_id uuid not null references auth.users (id) on delete cascade,
