@@ -362,6 +362,28 @@ export function usePrivateGuilds(enabled, userId) {
         invitee_id: inviteeUserId,
         status: "pending",
       });
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "friends-invite-lag",
+          hypothesisId: "H3",
+          location: "client/src/hooks/usePrivateGuilds.js:sendGuildInvite",
+          message: "Guild invite insert attempted",
+          data: {
+            guildId,
+            invitedBy: userId,
+            inviteeUserId,
+            hasError: Boolean(e),
+            error: e?.message || null,
+            code: e?.code || null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (e) return { ok: false, message: e.message };
       return { ok: true };
     },
@@ -372,6 +394,21 @@ export function usePrivateGuilds(enabled, userId) {
     async (inviteId) => {
       if (!supabase) return { ok: false, message: "Supabase indisponible" };
       const { error: e } = await supabase.rpc("accept_guild_invite", { p_invite_id: inviteId });
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "friends-invite-lag",
+          hypothesisId: "H4",
+          location: "client/src/hooks/usePrivateGuilds.js:acceptGuildInvite",
+          message: "Accept guild invite RPC attempted",
+          data: { inviteId, hasError: Boolean(e), error: e?.message || null, code: e?.code || null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (e) return { ok: false, message: e.message };
       await load();
       return { ok: true };

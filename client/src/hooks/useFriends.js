@@ -34,6 +34,21 @@ export function useFriends(enabled, myUserId) {
         .or(`from_id.eq.${myUserId},to_id.eq.${myUserId}`);
 
       if (qErr) throw qErr;
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "friends-invite-lag",
+          hypothesisId: "H1",
+          location: "client/src/hooks/useFriends.js:load",
+          message: "Friend requests loaded",
+          data: { myUserId, totalRows: (rows || []).length },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
 
       const accepted = (rows || []).filter((r) => r.status === "accepted");
       const pendingIn = (rows || []).filter(
@@ -84,6 +99,21 @@ export function useFriends(enabled, myUserId) {
         }))
       );
     } catch (e) {
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "friends-invite-lag",
+          hypothesisId: "H1",
+          location: "client/src/hooks/useFriends.js:load:catch",
+          message: "Friend requests load failed",
+          data: { myUserId, message: e?.message || "unknown", code: e?.code || null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setError(e?.message || "Impossible de charger les amis");
       setFriends([]);
       setIncoming([]);
@@ -201,6 +231,21 @@ export function useFriends(enabled, myUserId) {
         .update({ status: "accepted" })
         .eq("id", requestId)
         .eq("to_id", myUserId);
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "friends-invite-lag",
+          hypothesisId: "H2",
+          location: "client/src/hooks/useFriends.js:acceptRequest",
+          message: "Accept friend request attempted",
+          data: { requestId, myUserId, hasError: Boolean(uErr), error: uErr?.message || null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (uErr) throw uErr;
       await load();
     },
