@@ -31,21 +31,6 @@ function normalizeIconOpts(iconOpts) {
 async function persistNewGuildIcons(gid, iconOpts) {
   const { iconUrl, iconBrandKey } = normalizeIconOpts(iconOpts || {});
   if (!iconUrl && !iconBrandKey) {
-    // #region agent log
-    fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: '4bd8e4',
-        runId: 'icon-debug',
-        hypothesisId: 'H0_icon_opts_missing',
-        location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:optsMissing',
-        message: 'No iconUrl/iconBrandKey to persist',
-        data: { gid },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return { ok: true };
   }
   if (!supabase) return { ok: false, message: "Supabase indisponible" };
@@ -54,45 +39,8 @@ async function persistNewGuildIcons(gid, iconOpts) {
     ? { icon_url: iconUrl, icon_brand_key: null }
     : { icon_brand_key: iconBrandKey, icon_url: null };
 
-  // #region agent log
-  fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: '4bd8e4',
-      runId: 'icon-debug',
-      hypothesisId: 'H1_icon_patch_called',
-      location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:patch',
-      message: 'Trying to patch guild icon_*',
-      data: { gid, hasIconUrl: !!iconUrl, iconBrandKey: iconBrandKey ?? null },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-
   const { error } = await supabase.from("guilds").update(patch).eq("id", gid);
   if (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: '4bd8e4',
-        runId: 'icon-debug',
-        hypothesisId: 'H2_icon_patch_error',
-        location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:updateError',
-        message: 'Guild icon patch failed',
-        data: {
-          gid,
-          hasIconUrl: !!iconUrl,
-          iconBrandKey: iconBrandKey ?? null,
-          errorMessage: error?.message || null,
-          errorDetails: error?.details || null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     const col = /column|schema|icon_/i.test(`${error.message || ""} ${error.details || ""}`);
     return {
       ok: false,
@@ -101,22 +49,6 @@ async function persistNewGuildIcons(gid, iconOpts) {
         : error.message || "Sauvegarde de l’icône impossible",
     };
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: '4bd8e4',
-      runId: 'icon-debug',
-      hypothesisId: 'H3_icon_patch_succeeded',
-      location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:updateOk',
-      message: 'Guild icon patch succeeded',
-      data: { gid, hasIconUrl: !!iconUrl, iconBrandKey: iconBrandKey ?? null },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
 
   return { ok: true };
 }
@@ -236,32 +168,6 @@ export function usePrivateGuilds(enabled, userId) {
           gErr = fallback.error;
         }
         if (gErr) throw gErr;
-
-        // #region agent log
-        fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: '4bd8e4',
-            runId: 'icon-debug',
-            hypothesisId: 'H4_icon_snapshot_after_reload',
-            location: 'client/src/hooks/usePrivateGuilds.js:load:guildRows:iconSnapshot',
-            message: 'Snapshot icon_* from guild rows',
-            data: {
-              total: (guildRows || []).length,
-              withIcons: (guildRows || [])
-                .filter((x) => x?.icon_url || x?.icon_brand_key)
-                .slice(0, 5)
-                .map((x) => ({
-                  id: x.id,
-                  iconBrandKey: x.icon_brand_key ?? null,
-                  hasIconUrl: !!x.icon_url,
-                })),
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
 
         if (seq !== loadSeq.current) return;
         const roleByGid = new Map((memberships || []).map((m) => [m.guild_id, m.role]));
