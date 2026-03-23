@@ -113,11 +113,14 @@ to authenticated
 using (owner_id = auth.uid());
 
 -- guild_members
+-- Important : inclure user_id = auth.uid() — un USING avec seul EXISTS sur la même table
+-- peut empêcher de voir sa propre ligne (sous-requête soumise à la même RLS), liste vide au F5.
 create policy "gm_select_same_guild"
 on public.guild_members for select
 to authenticated
 using (
-  exists (
+  user_id = auth.uid()
+  or exists (
     select 1 from public.guild_members me
     where me.guild_id = guild_members.guild_id and me.user_id = auth.uid()
   )
