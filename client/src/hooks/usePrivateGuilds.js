@@ -66,7 +66,7 @@ function guildEntryFromRow(g, roleByGid) {
 
 /** Tables guild_* absentes : exécuter supabase/private-guilds.sql dans le SQL Editor. */
 export const GUILD_SQL_SETUP_HINT =
-  "Ouvre Supabase → SQL Editor, colle tout le fichier supabase/private-guilds.sql du dépôt (après friends-dm.sql), exécute, puis recharge la page.";
+  "Ouvre Supabase → SQL Editor, exécute le fichier supabase/full-setup.sql du dépôt, puis recharge la page.";
 
 function isMissingGuildRpcError(e) {
   if (!e) return false;
@@ -115,16 +115,19 @@ export function usePrivateGuilds(enabled, userId) {
   const load = useCallback(async () => {
     if (!enabled || !userId || !supabase) return;
     const seq = ++loadSeq.current;
+    let stage = "start";
     setLoading(true);
     setError(null);
     try {
       // S’assure que le JWT est bien chargé avant les requêtes RLS (sinon 0 ligne sans erreur au F5 / en prod).
+      stage = "auth.getSession";
       await supabase.auth.getSession();
 
       // 1) RPC security definer : liste fiable des membreships (évite RLS cassée sur guild_members).
       // 2) Sinon requête table + retry (bases sans la RPC).
       let memberships;
       let mErr;
+      stage = "rpc.list_my_guild_memberships";
       const rpcRes = await supabase.rpc("list_my_guild_memberships");
       if (!rpcRes.error) {
         memberships = (rpcRes.data ?? []).map((r) => ({
@@ -155,6 +158,7 @@ export function usePrivateGuilds(enabled, userId) {
       if (guildIds.length) {
         let guildRows;
         let gErr;
+        stage = "select.guilds";
         const selFull = await supabase
           .from("guilds")
           .select("id, name, owner_id, icon_url, icon_brand_key")
@@ -242,10 +246,32 @@ export function usePrivateGuilds(enabled, userId) {
         );
       }
     } catch (e) {
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "rebuild-auth",
+          hypothesisId: "H3",
+          location: "client/src/hooks/usePrivateGuilds.js:load:catch",
+          message: "Private guild load failed",
+          data: { seq, stage, message: e?.message || "unknown", code: e?.code || null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (seq !== loadSeq.current) return;
       const missing = isGuildTablesMissingError(e);
       setGuildTablesMissing(missing);
-      setError(missing ? GUILD_SQL_SETUP_HINT : e?.message || "Erreur serveurs privés");
+      const networkDown = /failed to fetch|network|timeout|upstream|connect/i.test(String(e?.message || ""));
+      setError(
+        missing
+          ? GUILD_SQL_SETUP_HINT
+          : networkDown
+            ? "Connexion Supabase impossible (réseau/URL). Vérifie les variables SUPABASE_* et l’état du projet."
+            : e?.message || "Erreur serveurs privés"
+      );
       if (missing) {
         setGuilds([]);
         setIncomingInvites([]);
