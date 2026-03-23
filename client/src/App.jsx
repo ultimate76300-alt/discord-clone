@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
 import { loadIdentity } from "./lib/identity";
+import { isSupabaseConfigured, supabase } from "./lib/supabase";
+import { userToIdentity } from "./lib/authProfile";
 import { IdentityModal } from "./components/IdentityModal";
+import { AuthModal } from "./components/AuthModal";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
 import { VoiceView } from "./components/VoiceView";
@@ -29,7 +32,10 @@ function socketBaseUrl() {
 }
 
 export default function App() {
-  const [identity, setIdentity] = useState(() => loadIdentity());
+  const useSupabaseAuth = isSupabaseConfigured;
+  const [guestIdentity, setGuestIdentity] = useState(() => loadIdentity());
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(() => !useSupabaseAuth);
   const [connected, setConnected] = useState(false);
   const [socketError, setSocketError] = useState(null);
   const [textChannels, setTextChannels] = useState(DEFAULT_TEXT);
@@ -46,6 +52,36 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [peerMix, setPeerMix] = useState(() => new Map());
 
+  useEffect(() => {
+    if (!useSupabaseAuth || !supabase) return;
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (!cancelled) {
+        setSession(s);
+        setAuthReady(true);
+      }
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [useSupabaseAuth]);
+
+  const identity = useMemo(() => {
+    if (useSupabaseAuth) {
+      if (!session?.user) return null;
+      return userToIdentity(session.user);
+    }
+    return guestIdentity;
+  }, [useSupabaseAuth, session, guestIdentity]);
+
+  const accessToken = useSupabaseAuth ? session?.access_token ?? null : null;
+
   const socketUrl = useMemo(() => socketBaseUrl(), []);
   const socket = useMemo(
     () =>
@@ -54,8 +90,9 @@ export default function App() {
         transports: ["websocket", "polling"],
         reconnectionAttempts: 8,
         reconnectionDelay: 1000,
+        auth: useSupabaseAuth ? { token: accessToken || "" } : {},
       }),
-    [socketUrl]
+    [socketUrl, useSupabaseAuth, accessToken]
   );
 
   const onScreenShareEnd = useCallback(() => {
@@ -91,18 +128,17 @@ export default function App() {
   }, [muted, voice.setMuted]);
 
   useEffect(() => {
+    const canConnect = useSupabaseAuth
+      ? Boolean(session?.access_token)
+      : Boolean(guestIdentity);
+    if (!canConnect) {
+      if (socket.connected) socket.disconnect();
+      return;
+    }
+
     const onConnect = () => {
       setSocketError(null);
       setConnected(true);
-      const id = loadIdentity();
-      if (id) {
-        socket.emit("identity:set", {
-          clientId: id.clientId,
-          displayName: id.displayName,
-          avatarColor: id.avatarColor,
-          avatarEmoji: id.avatarEmoji,
-        });
-      }
     };
     const onChannelsConfig = (res) => {
       if (res?.text?.length) setTextChannels(res.text);
@@ -131,7 +167,7 @@ export default function App() {
       socket.off("channels:config", onChannelsConfig);
       socket.disconnect();
     };
-  }, [socket]);
+  }, [socket, useSupabaseAuth, session?.access_token, guestIdentity]);
 
   useEffect(() => {
     if (!identity || !connected) return;
@@ -230,8 +266,28 @@ export default function App() {
     });
   }, []);
 
+  if (useSupabaseAuth && !authReady) {
+    return (
+      <div className="flex h-[100dvh] items-center justify-center bg-discord-bg text-discord-muted">
+        Chargement…
+      </div>
+    );
+  }
+
+  if (useSupabaseAuth && !session) {
+    return <AuthModal />;
+  }
+
+  if (!useSupabaseAuth && !guestIdentity) {
+    return <IdentityModal onComplete={setGuestIdentity} />;
+  }
+
   if (!identity) {
-    return <IdentityModal onComplete={setIdentity} />;
+    return (
+      <div className="flex h-[100dvh] items-center justify-center bg-discord-bg text-discord-muted">
+        Chargement…
+      </div>
+    );
   }
 
   return (
@@ -293,6 +349,13 @@ export default function App() {
         onToggleDeafen={() => setDeafened((d) => !d)}
         connectedVoiceId={connectedVoiceId}
         onOpenSettings={() => setSettingsOpen(true)}
+        onSignOut={
+          useSupabaseAuth && supabase
+            ? async () => {
+                await supabase.auth.signOut();
+              }
+            : undefined
+        }
       />
       {connectedVoiceId ? (
         <RemoteVoiceAudios

@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import http from "http";
 import cors from "cors";
+import { createClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,33 @@ const io = new Server(server, {
   },
 });
 
+const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+const supabaseServer =
+  supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
+
+if (supabaseServer) {
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token;
+      if (!token || typeof token !== "string") {
+        return next(new Error("auth_missing"));
+      }
+      const {
+        data: { user },
+        error,
+      } = await supabaseServer.auth.getUser(token);
+      if (error || !user) {
+        return next(new Error("auth_invalid"));
+      }
+      socket.data.supabaseUserId = user.id;
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+}
+
 /** @type {Map<string, { displayName: string; avatarColor: string; avatarEmoji: string; clientId: string }>} */
 const identities = new Map();
 
@@ -126,8 +154,15 @@ io.on("connection", (socket) => {
     if (!payload || typeof payload !== "object") return;
     const { clientId, displayName, avatarColor, avatarEmoji } = payload;
     if (!displayName || typeof displayName !== "string") return;
+    const verifiedId = socket.data.supabaseUserId;
+    const resolvedClientId =
+      typeof verifiedId === "string"
+        ? verifiedId
+        : typeof clientId === "string"
+          ? clientId
+          : socket.id;
     identities.set(socket.id, {
-      clientId: typeof clientId === "string" ? clientId : socket.id,
+      clientId: resolvedClientId,
       displayName: displayName.slice(0, 32),
       avatarColor: typeof avatarColor === "string" ? avatarColor : "#5865f2",
       avatarEmoji: typeof avatarEmoji === "string" ? avatarEmoji.slice(0, 4) : "👤",
