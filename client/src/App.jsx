@@ -8,6 +8,7 @@ import { VoiceView } from "./components/VoiceView";
 import { UserBar } from "./components/UserBar";
 import { RemoteVoiceAudios } from "./components/RemoteVoiceAudios";
 import { SettingsModal } from "./components/SettingsModal";
+import { ConnectedUsersTab } from "./components/ConnectedUsersTab";
 import { useVoiceConnection } from "./hooks/useVoiceConnection";
 import { loadVoiceSettings, saveVoiceSettings } from "./lib/voiceSettings";
 
@@ -235,6 +236,13 @@ export default function App() {
 
   return (
     <div className="flex h-[100dvh] flex-col bg-discord-bg">
+      <header className="flex h-12 shrink-0 items-center justify-end border-b border-black/20 bg-discord-elevated px-3">
+        <ConnectedUsersTab
+          socket={socket}
+          connected={connected}
+          myClientId={identity.clientId}
+        />
+      </header>
       <div className="flex min-h-0 flex-1">
         <Sidebar
           textChannels={textChannels}

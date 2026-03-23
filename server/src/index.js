@@ -103,8 +103,24 @@ function getVoicePeers(channelId, excludeSocketId) {
   return peers;
 }
 
+function buildPresenceList() {
+  const users = [];
+  for (const [socketId, profile] of identities.entries()) {
+    users.push({ socketId: socketId, ...profile });
+  }
+  users.sort((a, b) =>
+    a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
+  );
+  return users;
+}
+
+function broadcastPresence() {
+  io.emit("presence:update", { users: buildPresenceList() });
+}
+
 io.on("connection", (socket) => {
   socket.emit("channels:config", { text: TEXT_CHANNELS, voice: VOICE_CHANNELS });
+  socket.emit("presence:update", { users: buildPresenceList() });
 
   socket.on("identity:set", (payload) => {
     if (!payload || typeof payload !== "object") return;
@@ -116,6 +132,7 @@ io.on("connection", (socket) => {
       avatarColor: typeof avatarColor === "string" ? avatarColor : "#5865f2",
       avatarEmoji: typeof avatarEmoji === "string" ? avatarEmoji.slice(0, 4) : "👤",
     });
+    broadcastPresence();
   });
 
   socket.on("text:join", (channelId) => {
@@ -219,6 +236,7 @@ io.on("connection", (socket) => {
     }
     voiceChannelBySocket.delete(socket.id);
     identities.delete(socket.id);
+    broadcastPresence();
   });
 });
 
