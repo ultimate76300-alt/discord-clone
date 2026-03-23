@@ -82,7 +82,7 @@ app.get("/api/client-env.json", (_req, res) => {
 if (fs.existsSync(CLIENT_DIST)) {
   app.use(express.static(CLIENT_DIST));
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/socket.io")) return next();
+    if (req.path.startsWith("/api") || req.path.startsWith("/socket.io")) return next();
     res.sendFile(path.join(CLIENT_DIST, "index.html"));
   });
 }
