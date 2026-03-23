@@ -48,10 +48,10 @@ export function GuildServerRail({
               type="button"
               title={g.name}
               onClick={() => onSelectPrivateGuild?.(g.id)}
-              className={`${railBtn} text-sm font-semibold ${
+              className={`${railBtn} bg-transparent text-sm font-semibold ${
                 active
-                  ? "rounded-2xl bg-discord-accent text-white ring-0"
-                  : "bg-discord-sidebar text-discord-text hover:rounded-xl hover:bg-discord-accent hover:text-white"
+                  ? "rounded-2xl ring-2 ring-discord-accent ring-offset-2 ring-offset-[#1e1f22]"
+                  : "ring-1 ring-white/12 text-discord-text hover:rounded-xl hover:bg-white/[0.07] hover:ring-white/22"
               }`}
             >
               {g.iconUrl ? (

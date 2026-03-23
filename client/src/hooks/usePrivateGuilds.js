@@ -100,12 +100,24 @@ export function usePrivateGuilds(enabled, userId) {
     setLoading(true);
     setError(null);
     try {
+      // S’assure que le JWT est bien chargé avant les requêtes RLS (sinon 0 ligne sans erreur au F5 / en prod).
+      await supabase.auth.getSession();
+
       // Deux requêtes : l’embed PostgREST `guilds(...)` peut renvoyer null selon RLS / cache,
       // ce qui vidait la liste côté client alors que les lignes guild_members existent.
-      const { data: memberships, error: mErr } = await supabase
-        .from("guild_members")
-        .select("role, guild_id")
-        .eq("user_id", userId);
+      let memberships;
+      let mErr;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+          if (seq !== loadSeq.current) return;
+          await new Promise((r) => setTimeout(r, 450));
+        }
+        const res = await supabase.from("guild_members").select("role, guild_id").eq("user_id", userId);
+        memberships = res.data;
+        mErr = res.error;
+        if (mErr) break;
+        if ((memberships?.length ?? 0) > 0) break;
+      }
       if (mErr) throw mErr;
       if (seq !== loadSeq.current) return;
       setGuildTablesMissing(false);
