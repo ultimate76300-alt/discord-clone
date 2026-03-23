@@ -14,7 +14,7 @@ const PORT = Number(process.env.PORT) || 3001;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
 /** Allow configured origin + localhost + Railway public URLs. */
-function allowClientOrigin(origin) {
+function isOriginAllowed(origin) {
   if (!origin) return true;
   if (origin === CLIENT_ORIGIN) return true;
   try {
@@ -28,6 +28,14 @@ function allowClientOrigin(origin) {
   }
 }
 
+/**
+ * The `cors` package requires `origin: (origin, cb) => cb(null, allowed)`.
+ * A sync `(origin) => boolean` never calls `cb`, so every request hangs (static assets + Socket.IO).
+ */
+function corsAllow(origin, callback) {
+  callback(null, isOriginAllowed(origin));
+}
+
 const app = express();
 
 // Before CORS: Railway healthchecks use Host healthcheck.railway.app and must always get 200.
@@ -39,7 +47,7 @@ app.head("/health", (_req, res) => {
 });
 
 app.set("trust proxy", 1);
-app.use(cors({ origin: allowClientOrigin }));
+app.use(cors({ origin: corsAllow }));
 
 if (fs.existsSync(CLIENT_DIST)) {
   app.use(express.static(CLIENT_DIST));
@@ -53,7 +61,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowClientOrigin,
+    origin: corsAllow,
     methods: ["GET", "POST"],
   },
 });
