@@ -31,7 +31,9 @@ function allowClientOrigin(origin) {
 const app = express();
 app.set("trust proxy", 1);
 app.use(cors({ origin: allowClientOrigin }));
-app.get("/health", (_req, res) => res.json({ ok: true }));
+
+// 🚀 FIX RAILWAY HEALTHCHECK
+app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 if (fs.existsSync(CLIENT_DIST)) {
   app.use(express.static(CLIENT_DIST));
