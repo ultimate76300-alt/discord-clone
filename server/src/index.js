@@ -47,6 +47,13 @@ app.head("/health", (_req, res) => {
 });
 
 app.set("trust proxy", 1);
+app.use((req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(self), microphone=(self), display-capture=(self)"
+  );
+  next();
+});
 app.use(cors({ origin: corsAllow }));
 
 if (fs.existsSync(CLIENT_DIST)) {

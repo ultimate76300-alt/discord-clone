@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const ICE = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-};
+/** Optional: Railway / Vite build var, JSON array of RTCIceServer objects (incl. TURN). */
+function getIceServers() {
+  const raw = import.meta.env.VITE_ICE_SERVERS;
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch (e) {
+      console.warn("VITE_ICE_SERVERS is not valid JSON", e);
+    }
+  }
+  return [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+}
+
+function newPeerConnection() {
+  return new RTCPeerConnection({ iceServers: getIceServers() });
+}
 
 function shouldOffer(myId, peerId) {
   return myId < peerId;
@@ -16,6 +33,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   const localStreamRef = useRef(null);
   const pcsRef = useRef(new Map());
   const voiceChannelRef = useRef(null);
+  const renegotiateTimeoutRef = useRef(null);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -40,6 +58,10 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   }, []);
 
   const cleanupAll = useCallback(() => {
+    if (renegotiateTimeoutRef.current) {
+      clearTimeout(renegotiateTimeoutRef.current);
+      renegotiateTimeoutRef.current = null;
+    }
     for (const id of [...pcsRef.current.keys()]) cleanupPeer(id);
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -64,10 +86,36 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
     }
   }, []);
 
+  const renegotiatePeers = useCallback(async () => {
+    const ch = voiceChannelRef.current;
+    if (!ch || !socket?.connected) return;
+    for (const [peerId, pc] of pcsRef.current.entries()) {
+      if (pc.signalingState !== "stable") continue;
+      try {
+        pc._suppressNegotiation = true;
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("webrtc:offer", { to: peerId, sdp: offer, channelId: ch });
+      } catch (e) {
+        console.error("renegotiatePeers", peerId, e);
+      } finally {
+        pc._suppressNegotiation = false;
+      }
+    }
+  }, [socket]);
+
+  const scheduleRenegotiate = useCallback(() => {
+    if (renegotiateTimeoutRef.current) clearTimeout(renegotiateTimeoutRef.current);
+    renegotiateTimeoutRef.current = setTimeout(() => {
+      renegotiateTimeoutRef.current = null;
+      void renegotiatePeers();
+    }, 200 + Math.floor(Math.random() * 350));
+  }, [renegotiatePeers]);
+
   const createPeerConnection = useCallback(
     (peerId) => {
       if (pcsRef.current.has(peerId)) return pcsRef.current.get(peerId);
-      const pc = new RTCPeerConnection(ICE);
+      const pc = newPeerConnection();
       pcsRef.current.set(peerId, pc);
 
       pc.onicecandidate = (ev) => {
@@ -84,26 +132,6 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           next.set(peerId, stream);
           return next;
         });
-      };
-
-      /** Needed when adding video (camera/screen) after the session was audio-only. */
-      pc.onnegotiationneeded = async () => {
-        if (pc._suppressNegotiation || !voiceChannelRef.current || !socket?.connected) return;
-        if (pc.signalingState !== "stable") return;
-        try {
-          pc._suppressNegotiation = true;
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit("webrtc:offer", {
-            to: peerId,
-            sdp: offer,
-            channelId: voiceChannelRef.current,
-          });
-        } catch (e) {
-          console.error("negotiationneeded", e);
-        } finally {
-          pc._suppressNegotiation = false;
-        }
       };
 
       attachLocalTracks(pc);
@@ -185,6 +213,13 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
       attachLocalTracks(pc);
       try {
         pc._suppressNegotiation = true;
+        if (pc.signalingState === "have-local-offer") {
+          try {
+            await pc.setLocalDescription({ type: "rollback" });
+          } catch {
+            /* ignore — browser may not support rollback */
+          }
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -290,7 +325,8 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
       }
     }
     bumpLocal();
-  }, [bumpLocal]);
+    if (pcsRef.current.size > 0) scheduleRenegotiate();
+  }, [bumpLocal, scheduleRenegotiate]);
 
   const setMuted = useCallback((muted) => {
     const stream = localStreamRef.current;
@@ -340,9 +376,8 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   const toggleScreenShare = useCallback(
     async (enabled) => {
       const stream = await getLocalStream();
-      const videoTracks = stream.getVideoTracks();
       if (enabled) {
-        for (const t of videoTracks) {
+        for (const t of stream.getVideoTracks()) {
           t.stop();
           stream.removeTrack(t);
         }
@@ -357,10 +392,10 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           onScreenShareEnd?.();
         });
       } else {
-        videoTracks.forEach((t) => {
+        for (const t of stream.getVideoTracks()) {
           t.stop();
           stream.removeTrack(t);
-        });
+        }
       }
       syncTracksToPeers();
     },
