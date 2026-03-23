@@ -1,4 +1,6 @@
+import { randomUUID } from "crypto";
 import express from "express";
+import multer from "multer";
 
 function createError(status, message) {
   const err = new Error(message);
@@ -14,7 +16,52 @@ function mapProfile(p) {
   };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const uploadChat = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+const ALLOWED_CHAT_MIME = /^image\/|video\/|audio\/|application\/pdf|application\/zip|text\/plain/i;
+
 export function registerApiRoutes(app, { supabaseServer }) {
+  const publicRouter = express.Router();
+
+  publicRouter.post("/auth/register", async (req, res, next) => {
+    try {
+      if (!supabaseServer) throw createError(503, "Supabase non configuré.");
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      const displayName = String(req.body?.displayName || "").trim().slice(0, 32);
+      const avatarColor =
+        typeof req.body?.avatarColor === "string" && req.body.avatarColor.length <= 16
+          ? req.body.avatarColor
+          : "#5865f2";
+      const avatarEmoji =
+        typeof req.body?.avatarEmoji === "string" ? req.body.avatarEmoji.slice(0, 8) : "👤";
+
+      if (!EMAIL_RE.test(email)) throw createError(400, "E-mail invalide.");
+      if (password.length < 6) throw createError(400, "Mot de passe : au moins 6 caractères.");
+      if (displayName.length < 1) throw createError(400, "Indiquez un pseudo.");
+
+      const { error } = await supabaseServer.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          display_name: displayName,
+          avatar_color: avatarColor,
+          avatar_emoji: avatarEmoji,
+        },
+      });
+      if (error) throw createError(400, error.message);
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   const router = express.Router();
 
   router.use(async (req, _res, next) => {
@@ -34,6 +81,43 @@ export function registerApiRoutes(app, { supabaseServer }) {
       next(e);
     }
   });
+
+  router.post(
+    "/chat/upload",
+    uploadChat.single("file"),
+    async (req, res, next) => {
+      try {
+        const userId = req.authUser.id;
+        const f = req.file;
+        if (!f?.buffer) throw createError(400, "Fichier manquant.");
+        const mime = String(f.mimetype || "application/octet-stream");
+        if (!ALLOWED_CHAT_MIME.test(mime)) {
+          throw createError(400, "Type de fichier non autorisé.");
+        }
+        const safe =
+          String(f.originalname || "file")
+            .replace(/[^\w.\-()+@\[\]\s]/g, "_")
+            .trim()
+            .slice(0, 120) || "file";
+        const path = `${userId}/${randomUUID()}_${safe}`;
+        const { error: upErr } = await supabaseServer.storage.from("chat-attachments").upload(path, f.buffer, {
+          contentType: mime,
+          upsert: false,
+        });
+        if (upErr) throw createError(400, upErr.message);
+        const { data: pub } = supabaseServer.storage.from("chat-attachments").getPublicUrl(path);
+        res.json({
+          ok: true,
+          url: pub.publicUrl,
+          storagePath: path,
+          fileName: f.originalname || safe,
+          mimeType: mime,
+        });
+      } catch (e) {
+        next(e);
+      }
+    }
+  );
 
   router.get("/health/details", async (_req, res) => {
     const started = Date.now();
@@ -244,10 +328,14 @@ export function registerApiRoutes(app, { supabaseServer }) {
     }
   });
 
-  app.use(express.json());
+  app.use("/api", express.json());
+  app.use("/api", publicRouter);
   app.use("/api", router);
 
   app.use("/api", (err, _req, res, _next) => {
+    if (err?.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ ok: false, message: "Fichier trop volumineux (max 25 Mo)." });
+    }
     const status = Number(err?.status) || 500;
     res.status(status).json({ ok: false, message: err?.message || "Erreur API." });
   });

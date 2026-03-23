@@ -868,7 +868,7 @@ export default function App() {
               messages={messages}
               connected={connected}
               connectionError={socketError}
-              onSend={sendChat}
+              onSend={({ text, attachment }) => sendChat(text, attachment)}
               headerTrailing={connectedUsersTab}
             />
           ) : null}
@@ -888,8 +888,8 @@ export default function App() {
                 ready={dmReady}
                 headerTrailing={connectedUsersTab}
                 peerOnline={onlineUserIds.has(selectedDmPeerId)}
-                onSend={async (text) => {
-                  await sendDmMessage(text);
+                onSend={async ({ text, attachment }) => {
+                  await sendDmMessage(text, attachment);
                 }}
               />
             ) : (

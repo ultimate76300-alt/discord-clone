@@ -2,6 +2,7 @@ import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { AVATAR_COLORS, AVATAR_EMOJIS } from "../lib/identity";
 import { randomAvatarMeta } from "../lib/authProfile";
+import { apiPostPublic } from "../lib/backendApi";
 
 function friendlyAuthError(raw) {
   const m = String(raw || "").toLowerCase();
@@ -52,23 +53,49 @@ export function AuthModal() {
     if (!supabase) return;
     setLoading(true);
     try {
-      const { data, error: err } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            display_name: name,
-            avatar_color: avatar.avatar_color,
-            avatar_emoji: avatar.avatar_emoji,
-          },
-        },
-      });
-      if (err) {
-        setError(friendlyAuthError(err.message));
+      const em = email.trim();
+      try {
+        await apiPostPublic("/api/auth/register", {
+          email: em,
+          password,
+          displayName: name,
+          avatarColor: avatar.avatar_color,
+          avatarEmoji: avatar.avatar_emoji,
+        });
+      } catch (apiErr) {
+        const m = String(apiErr?.message || "");
+        if (/supabase non configuré|503/i.test(m)) {
+          const { data, error: err } = await supabase.auth.signUp({
+            email: em,
+            password,
+            options: {
+              data: {
+                display_name: name,
+                avatar_color: avatar.avatar_color,
+                avatar_emoji: avatar.avatar_emoji,
+              },
+            },
+          });
+          if (err) {
+            setError(friendlyAuthError(err.message));
+            return;
+          }
+          if (data.user && !data.session) {
+            setInfo("Vérifiez votre boîte mail pour confirmer votre compte.");
+          }
+          return;
+        }
+        setError(friendlyAuthError(m));
         return;
       }
-      if (data.user && !data.session) {
-        setInfo("Vérifiez votre boîte mail pour confirmer votre compte.");
+
+      const { error: signErr } = await supabase.auth.signInWithPassword({
+        email: em,
+        password,
+      });
+      if (signErr) {
+        setInfo("Compte créé. Connecte-toi avec ton e-mail et ton mot de passe.");
+        setMode("login");
       }
     } finally {
       setLoading(false);

@@ -5,4 +5,5 @@
 -- 4) ../private-guilds-invites-friends-only.sql
 -- 5) 001_performance_core.sql
 -- 6) 002_read_models.sql
--- 7) select pg_notify('pgrst', 'reload schema');
+-- 7) 003_chat_attachments.sql
+-- 8) select pg_notify('pgrst', 'reload schema');

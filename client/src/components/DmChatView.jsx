@@ -1,7 +1,15 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatMessageTime } from "../lib/time";
+import { apiUploadChatFile } from "../lib/backendApi";
 import { AvatarBubble } from "./AvatarBubble";
+import { ChatMessageAttachment } from "./ChatMessageAttachment";
 import { EmojiPicker } from "./EmojiPicker";
+
+function expiresAtToMs(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
 
 export function DmChatView({
   peerDisplayName,
@@ -21,25 +29,56 @@ export function DmChatView({
 }) {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+  const fileRef = useRef(null);
+  const [attachmentMeta, setAttachmentMeta] = useState(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadErr, setUploadErr] = useState(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  function handleSubmit(e) {
-    e.preventDefault();
-    const el = inputRef.current;
-    if (!el || !ready) return;
-    const text = el.value.trim();
-    if (!text) return;
-    void onSend(text).then(() => {
-      el.value = "";
-    });
+  async function onPickFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || !ready) return;
+    setUploadErr(null);
+    setUploadBusy(true);
+    setAttachmentMeta(null);
+    try {
+      const meta = await apiUploadChatFile(f);
+      setAttachmentMeta({
+        url: meta.url,
+        storagePath: meta.storagePath,
+        fileName: meta.fileName,
+        mimeType: meta.mimeType,
+      });
+    } catch (err) {
+      setUploadErr(err?.message || "Upload impossible");
+    } finally {
+      setUploadBusy(false);
+    }
   }
 
   function senderLabel(senderId) {
     if (senderId === selfUserId) return selfDisplayName || "Vous";
     return peerDisplayName || "Ami";
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const el = inputRef.current;
+    if (!el || !ready) return;
+    const text = el.value.trim();
+    if (!text && !attachmentMeta) return;
+    try {
+      await onSend({ text, attachment: attachmentMeta || undefined });
+      el.value = "";
+      setAttachmentMeta(null);
+      setUploadErr(null);
+    } catch {
+      /* parent peut afficher une erreur */
+    }
   }
 
   return (
@@ -69,6 +108,7 @@ export function DmChatView({
         <ul className="space-y-4">
           {messages.map((m) => {
             const mine = m.sender_id === selfUserId;
+            const expMs = expiresAtToMs(m.expires_at);
             return (
               <li key={m.id} className="group flex gap-3">
                 <AvatarBubble
@@ -89,9 +129,19 @@ export function DmChatView({
                       {formatMessageTime(new Date(m.created_at).getTime())}
                     </time>
                   </div>
-                  <p className="mt-0.5 whitespace-pre-wrap break-words text-[15px] text-discord-text">
-                    {m.body}
-                  </p>
+                  {m.body && m.body !== "📎" ? (
+                    <p className="mt-0.5 whitespace-pre-wrap break-words text-[15px] text-discord-text">
+                      {m.body}
+                    </p>
+                  ) : null}
+                  {m.file_url ? (
+                    <ChatMessageAttachment
+                      fileUrl={m.file_url}
+                      fileName={m.file_name}
+                      fileType={m.file_type}
+                      expiresAtMs={expMs}
+                    />
+                  ) : null}
                 </div>
               </li>
             );
@@ -104,7 +154,30 @@ export function DmChatView({
         onSubmit={handleSubmit}
         className="shrink-0 border-t border-discord-border bg-discord-bg p-4"
       >
+        {attachmentMeta ? (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-discord-input px-3 py-2 text-xs text-discord-text ring-1 ring-discord-border">
+            <span className="min-w-0 truncate">📎 {attachmentMeta.fileName}</span>
+            <button
+              type="button"
+              onClick={() => setAttachmentMeta(null)}
+              className="shrink-0 text-discord-muted hover:text-red-300"
+            >
+              Retirer
+            </button>
+          </div>
+        ) : null}
+        {uploadErr ? <p className="mb-2 text-xs text-red-400">{uploadErr}</p> : null}
         <div className="flex items-center gap-1 rounded-lg bg-discord-input px-1 py-1 ring-1 ring-discord-border/80 sm:px-2">
+          <input ref={fileRef} type="file" className="hidden" onChange={onPickFile} />
+          <button
+            type="button"
+            disabled={!ready || uploadBusy}
+            onClick={() => fileRef.current?.click()}
+            title="Joindre un fichier"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-lg text-discord-muted transition hover:bg-discord-hover hover:text-discord-text disabled:opacity-40"
+          >
+            {uploadBusy ? "…" : "📎"}
+          </button>
           <EmojiPicker inputRef={inputRef} disabled={!ready} />
           <input
             ref={inputRef}

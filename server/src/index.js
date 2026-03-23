@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -150,6 +151,44 @@ const PUBLIC_TEXT_SET = new Set(TEXT_CHANNELS);
 const PUBLIC_VOICE_SET = new Set(VOICE_CHANNELS);
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const MS_24H = 24 * 60 * 60 * 1000;
+
+function stripStoragePathForClient(m) {
+  if (!m || typeof m !== "object") return m;
+  const { storagePath: _s, ...rest } = m;
+  return rest;
+}
+
+function verifyUserStoragePath(userId, storagePath) {
+  if (!userId || typeof storagePath !== "string") return false;
+  const p = storagePath.trim();
+  if (!p || p.includes("..") || p.startsWith("/")) return false;
+  const uid = String(userId).toLowerCase();
+  const head = p.split("/")[0]?.toLowerCase();
+  return head === uid;
+}
+
+function mapGuildMessageRow(row, prof) {
+  const p = prof;
+  const msg = {
+    id: row.id,
+    clientId: row.sender_id,
+    displayName: p?.display_name || "Utilisateur",
+    avatarColor: "#5865f2",
+    avatarEmoji: "👤",
+    ...(p?.avatar_url ? { avatarUrl: p.avatar_url } : {}),
+    text: row.body,
+    ts: new Date(row.created_at).getTime(),
+  };
+  if (row.file_url) {
+    msg.fileUrl = row.file_url;
+    msg.fileName = row.file_name || "Fichier";
+    msg.fileType = row.file_type || null;
+    msg.expiresAt = row.expires_at ? new Date(row.expires_at).getTime() : Date.now() + MS_24H;
+  }
+  return msg;
+}
 
 function unwrapSocketArg(raw) {
   if (Array.isArray(raw) && raw.length > 0) return unwrapSocketArg(raw[0]);
@@ -316,7 +355,7 @@ async function fetchGuildMessageHistory(channelId) {
   if (!supabaseServer) return [];
   const { data: rows, error } = await supabaseServer
     .from("guild_messages")
-    .select("id, body, created_at, sender_id")
+    .select("id, body, created_at, sender_id, file_url, file_name, file_type, expires_at")
     .eq("channel_id", channelId)
     .order("created_at", { ascending: true })
     .limit(500);
@@ -330,19 +369,7 @@ async function fetchGuildMessageHistory(channelId) {
     .select("id, display_name, avatar_url")
     .in("id", ids);
   const pm = new Map((profs || []).map((p) => [p.id, p]));
-  return rows.map((row) => {
-    const p = pm.get(row.sender_id);
-    return {
-      id: row.id,
-      clientId: row.sender_id,
-      displayName: p?.display_name || "Utilisateur",
-      avatarColor: "#5865f2",
-      avatarEmoji: "👤",
-      ...(p?.avatar_url ? { avatarUrl: p.avatar_url } : {}),
-      text: row.body,
-      ts: new Date(row.created_at).getTime(),
-    };
-  });
+  return rows.map((row) => mapGuildMessageRow(row, pm.get(row.sender_id)));
 }
 
 function buildPresenceList() {
@@ -587,20 +614,43 @@ io.on("connection", (socket) => {
       const profile = identities.get(socket.id);
       if (!profile) return;
       const ctx = textChatBySocket.get(socket.id);
-      if (!ctx || typeof payload?.text !== "string") return;
-      const text = payload.text.trim().slice(0, 2000);
-      if (!text) return;
+      if (!ctx) return;
 
-      const msg = {
-        id: `${Date.now()}-${socket.id}`,
+      const textRaw = typeof payload?.text === "string" ? payload.text.trim().slice(0, 2000) : "";
+      const att = payload?.attachment;
+      const hasAtt =
+        att &&
+        typeof att === "object" &&
+        typeof att.url === "string" &&
+        att.url.trim().startsWith("https://") &&
+        typeof att.storagePath === "string" &&
+        att.storagePath.length > 0;
+      const userId = socket.data.supabaseUserId;
+      if (hasAtt && userId && !verifyUserStoragePath(userId, att.storagePath)) return;
+
+      let bodyText = textRaw;
+      if (hasAtt && !bodyText) bodyText = "📎";
+      if (!hasAtt && !bodyText) return;
+
+      const now = Date.now();
+      const baseMsg = {
+        id: `${now}-${socket.id}`,
         clientId: profile.clientId,
         displayName: profile.displayName,
         avatarColor: profile.avatarColor,
         avatarEmoji: profile.avatarEmoji,
         ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
-        text,
-        ts: Date.now(),
+        text: bodyText,
+        ts: now,
       };
+      if (hasAtt) {
+        baseMsg.fileUrl = att.url.trim();
+        baseMsg.fileName = String(att.fileName || "fichier").slice(0, 256);
+        baseMsg.fileType = String(att.mimeType || "").slice(0, 128) || null;
+        baseMsg.expiresAt = now + MS_24H;
+        baseMsg.storagePath = att.storagePath;
+        baseMsg.id = `${now}-${socket.id}-${randomUUID().slice(0, 8)}`;
+      }
 
       if (ctx.scope === "public") {
         const ch = ctx.channelId;
@@ -608,13 +658,13 @@ io.on("connection", (socket) => {
         const key = msgKey(null, ch);
         const list = messagesByChannel[key];
         if (!list) return;
-        list.push(msg);
+        list.push(baseMsg);
         if (list.length > 500) list.splice(0, list.length - 500);
         io.to(room).emit("text:message", {
           scope: "public",
           guildId: null,
           channelId: ch,
-          message: msg,
+          message: stripStoragePathForClient(baseMsg),
         });
         return;
       }
@@ -622,27 +672,45 @@ io.on("connection", (socket) => {
       if (ctx.scope === "guild") {
         const { guildId, channelId } = ctx;
         const room = textRoom(guildId, channelId);
-        const userId = socket.data.supabaseUserId;
         if (!userId || !supabaseServer) return;
         const membership = await verifyGuildMember(guildId, userId);
         if (!membership) return;
         const meta = await loadGuildChannelMeta(guildId);
         if (!meta.textIds.has(channelId)) return;
+        const insertRow = {
+          channel_id: channelId,
+          sender_id: userId,
+          body: bodyText,
+          file_url: hasAtt ? baseMsg.fileUrl : null,
+          file_name: hasAtt ? baseMsg.fileName : null,
+          file_type: hasAtt ? baseMsg.fileType : null,
+          file_storage_path: hasAtt ? baseMsg.storagePath : null,
+        };
         const { data: row, error } = await supabaseServer
           .from("guild_messages")
-          .insert({
-            channel_id: channelId,
-            sender_id: userId,
-            body: text,
-          })
-          .select("id, created_at")
+          .insert(insertRow)
+          .select("id, created_at, body, file_url, file_name, file_type, expires_at")
           .single();
         if (error || !row) {
           console.error("guild_messages insert", error);
           return;
         }
-        msg.id = row.id;
-        msg.ts = new Date(row.created_at).getTime();
+        const msg = {
+          id: row.id,
+          clientId: profile.clientId,
+          displayName: profile.displayName,
+          avatarColor: profile.avatarColor,
+          avatarEmoji: profile.avatarEmoji,
+          ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
+          text: row.body,
+          ts: new Date(row.created_at).getTime(),
+        };
+        if (row.file_url) {
+          msg.fileUrl = row.file_url;
+          msg.fileName = row.file_name;
+          msg.fileType = row.file_type;
+          msg.expiresAt = row.expires_at ? new Date(row.expires_at).getTime() : Date.now() + MS_24H;
+        }
         io.to(room).emit("text:message", {
           scope: "guild",
           guildId,
@@ -761,6 +829,104 @@ io.on("connection", (socket) => {
     broadcastPresence();
   });
 });
+
+async function purgeExpiredChatAttachments() {
+  if (!supabaseServer) return;
+  const nowIso = new Date().toISOString();
+  const now = Date.now();
+
+  for (const ch of TEXT_CHANNELS) {
+    const key = msgKey(null, ch);
+    const list = messagesByChannel[key];
+    if (!list?.length) continue;
+    const room = textRoom(null, ch);
+    const kept = [];
+    for (const m of list) {
+      if (m.storagePath && m.expiresAt && m.expiresAt <= now) {
+        const { error } = await supabaseServer.storage.from("chat-attachments").remove([m.storagePath]);
+        if (error) {
+          console.warn("purge public attachment", error.message);
+          kept.push(m);
+          continue;
+        }
+        io.to(room).emit("text:message-expired", {
+          scope: "public",
+          guildId: null,
+          channelId: ch,
+          messageId: m.id,
+        });
+        continue;
+      }
+      kept.push(m);
+    }
+    messagesByChannel[key] = kept;
+  }
+
+  const { data: expiredGm } = await supabaseServer
+    .from("guild_messages")
+    .select("id, channel_id, file_storage_path")
+    .not("expires_at", "is", null)
+    .lt("expires_at", nowIso)
+    .limit(80);
+
+  const channelIds = [...new Set((expiredGm || []).map((r) => r.channel_id).filter(Boolean))];
+  let gidByCid = new Map();
+  if (channelIds.length) {
+    const { data: chRows } = await supabaseServer
+      .from("guild_channels")
+      .select("id, guild_id")
+      .in("id", channelIds);
+    gidByCid = new Map((chRows || []).map((c) => [c.id, c.guild_id]));
+  }
+
+  for (const row of expiredGm || []) {
+    const sp = row.file_storage_path;
+    if (sp) {
+      const { error: se } = await supabaseServer.storage.from("chat-attachments").remove([sp]);
+      if (se) {
+        console.warn("purge guild storage", se.message);
+        continue;
+      }
+    }
+    const { error: de } = await supabaseServer.from("guild_messages").delete().eq("id", row.id);
+    if (de) {
+      console.warn("purge guild_messages", de.message);
+      continue;
+    }
+    const gid = gidByCid.get(row.channel_id);
+    if (gid) {
+      io.to(textRoom(gid, row.channel_id)).emit("text:message-expired", {
+        scope: "guild",
+        guildId: gid,
+        channelId: row.channel_id,
+        messageId: row.id,
+      });
+    }
+  }
+
+  const { data: expiredDm } = await supabaseServer
+    .from("dm_messages")
+    .select("id, file_storage_path")
+    .not("expires_at", "is", null)
+    .lt("expires_at", nowIso)
+    .limit(80);
+
+  for (const row of expiredDm || []) {
+    if (row.file_storage_path) {
+      const { error: se } = await supabaseServer.storage.from("chat-attachments").remove([row.file_storage_path]);
+      if (se) {
+        console.warn("purge dm storage", se.message);
+        continue;
+      }
+    }
+    const { error: de } = await supabaseServer.from("dm_messages").delete().eq("id", row.id);
+    if (de) console.warn("purge dm_messages", de.message);
+  }
+}
+
+setInterval(() => {
+  void purgeExpiredChatAttachments();
+}, 45_000);
 
 // Omit host so Node binds dual-stack (:: + IPv4-mapped) where supported; avoids probes failing on IPv6-only paths.
 server.listen(PORT, () => {

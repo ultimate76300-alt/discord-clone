@@ -43,17 +43,38 @@ export function useServerTextChat({ socket, activeGuildId, selectedTextId }) {
       setMessages((prev) => [...prev, pkt.message]);
     };
 
+    const onExpired = (raw) => {
+      const pkt = unwrapSocketData(raw);
+      const t = targetRef.current;
+      if (!t || !eventMatchesChatTarget(t, pkt)) return;
+      const mid = pkt.messageId;
+      if (!mid) return;
+      setMessages((prev) => prev.filter((m) => m.id !== mid));
+    };
+
     socket.on("text:history", onHistory);
     socket.on("text:message", onMessage);
+    socket.on("text:message-expired", onExpired);
     return () => {
       socket.off("text:history", onHistory);
       socket.off("text:message", onMessage);
+      socket.off("text:message-expired", onExpired);
     };
   }, [socket]);
 
   const sendChat = useCallback(
-    (text) => {
-      socket.emit("text:message", { text });
+    (text, attachment) => {
+      socket.emit("text:message", {
+        text: text || "",
+        attachment: attachment
+          ? {
+              url: attachment.url,
+              storagePath: attachment.storagePath,
+              fileName: attachment.fileName,
+              mimeType: attachment.mimeType,
+            }
+          : undefined,
+      });
     },
     [socket]
   );
