@@ -25,6 +25,32 @@ const uploadChat = multer({
 
 const ALLOWED_CHAT_MIME = /^image\/|video\/|audio\/|application\/pdf|application\/zip|text\/plain/i;
 
+const CHAT_ATTACHMENTS_BUCKET = "chat-attachments";
+
+/** Crée le bucket si absent (évite « Bucket not found »). Utilise getBucket + createBucket (plus fiable que listBuckets selon les projets). */
+async function ensureChatAttachmentsBucket(client) {
+  const { data: existing } = await client.storage.getBucket(CHAT_ATTACHMENTS_BUCKET);
+  if (existing && (existing.id || existing.name)) {
+    return { ok: true, step: "exists" };
+  }
+  const { error: createErr } = await client.storage.createBucket(CHAT_ATTACHMENTS_BUCKET, {
+    public: true,
+    fileSizeLimit: 26214400,
+  });
+  if (!createErr) return { ok: true, step: "created" };
+  const m = String(createErr.message || "").toLowerCase();
+  if (
+    m.includes("already") ||
+    m.includes("exists") ||
+    m.includes("duplicate") ||
+    m.includes("taken") ||
+    m.includes("unique")
+  ) {
+    return { ok: true, step: "race" };
+  }
+  return { ok: false, step: "create", message: createErr.message };
+}
+
 export function registerApiRoutes(app, { supabaseServer }) {
   const publicRouter = express.Router();
 
@@ -100,12 +126,28 @@ export function registerApiRoutes(app, { supabaseServer }) {
             .trim()
             .slice(0, 120) || "file";
         const path = `${userId}/${randomUUID()}_${safe}`;
-        const { error: upErr } = await supabaseServer.storage.from("chat-attachments").upload(path, f.buffer, {
+        const bucketId = CHAT_ATTACHMENTS_BUCKET;
+        const ensureRes = await ensureChatAttachmentsBucket(supabaseServer);
+        if (!ensureRes.ok) {
+          console.warn("chat-attachments ensure failed", ensureRes.step, ensureRes.message);
+          throw createError(503, `Stockage indisponible (${ensureRes.step}): ${ensureRes.message || "erreur"}`);
+        }
+        let { error: upErr } = await supabaseServer.storage.from(bucketId).upload(path, f.buffer, {
           contentType: mime,
           upsert: false,
         });
+        if (upErr && /bucket.*not found|not found/i.test(String(upErr.message || ""))) {
+          const again = await ensureChatAttachmentsBucket(supabaseServer);
+          if (again.ok) {
+            const second = await supabaseServer.storage.from(bucketId).upload(path, f.buffer, {
+              contentType: mime,
+              upsert: false,
+            });
+            upErr = second.error;
+          }
+        }
         if (upErr) throw createError(400, upErr.message);
-        const { data: pub } = supabaseServer.storage.from("chat-attachments").getPublicUrl(path);
+        const { data: pub } = supabaseServer.storage.from(bucketId).getPublicUrl(path);
         res.json({
           ok: true,
           url: pub.publicUrl,
