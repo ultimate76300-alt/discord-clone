@@ -29,11 +29,17 @@ function allowClientOrigin(origin) {
 }
 
 const app = express();
+
+// Before CORS: Railway healthchecks use Host healthcheck.railway.app and must always get 200.
+app.get("/health", (_req, res) => {
+  res.status(200).type("text/plain").send("OK");
+});
+app.head("/health", (_req, res) => {
+  res.status(200).end();
+});
+
 app.set("trust proxy", 1);
 app.use(cors({ origin: allowClientOrigin }));
-
-// 🚀 FIX RAILWAY HEALTHCHECK
-app.get("/health", (_req, res) => res.status(200).send("OK"));
 
 if (fs.existsSync(CLIENT_DIST)) {
   app.use(express.static(CLIENT_DIST));
@@ -201,9 +207,10 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+// Omit host so Node binds dual-stack (:: + IPv4-mapped) where supported; avoids probes failing on IPv6-only paths.
+server.listen(PORT, () => {
   const hasUi = fs.existsSync(CLIENT_DIST);
   console.log(
-    `Listening on 0.0.0.0:${PORT} (static UI: ${hasUi ? "yes" : "no — run npm run build at repo root"})`
+    `Listening on port ${PORT} (static UI: ${hasUi ? "yes" : "no — run npm run build at repo root"})`
   );
 });
