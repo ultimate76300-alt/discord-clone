@@ -23,9 +23,15 @@ import { syncProfileToSupabase } from "./lib/syncProfile";
 import { useFriends } from "./hooks/useFriends";
 import { useDmMessages } from "./hooks/useDmMessages";
 import { usePrivateGuilds } from "./hooks/usePrivateGuilds";
+import { useServerTextChat } from "./hooks/useServerTextChat";
 import { DmChatView } from "./components/DmChatView";
+import {
+  PUBLIC_TEXT_SLUGS,
+  buildTextChatTarget,
+  canonicalPublicTextChannelId,
+} from "./lib/textChatProtocol";
 
-const DEFAULT_TEXT = ["general", "random", "dev", "off-topic"];
+const DEFAULT_TEXT = PUBLIC_TEXT_SLUGS;
 const DEFAULT_VOICE = ["Lobby", "Gaming", "Study"];
 
 const LAST_GUILD_STORAGE_KEY = "atomvoice:lastGuildCtx";
@@ -76,11 +82,14 @@ export default function App() {
   const [createGuildOpen, setCreateGuildOpen] = useState(false);
   const [manageGuildOpen, setManageGuildOpen] = useState(false);
   const activeGuildIdRef = useRef(null);
+  const selectedTextIdRef = useRef("");
   const lastGuildHydratedUserRef = useRef(null);
+  const loadGuildChannelsSeqRef = useRef(0);
   const [selectedTextId, setSelectedTextId] = useState("general");
+  /** True après un changement de serveur / F5 : on n’affiche pas les salons du lobby tant que le socket n’a pas renvoyé la config. */
+  const [awaitingChannelSync, setAwaitingChannelSync] = useState(false);
   const [mainPane, setMainPane] = useState("text");
   const [connectedVoiceId, setConnectedVoiceId] = useState(null);
-  const [messages, setMessages] = useState([]);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -146,10 +155,14 @@ export default function App() {
     sendGuildInvite,
     acceptGuildInvite,
     declineGuildInvite,
+    deleteGuild,
+    addGuildChannel,
+    deleteGuildChannel,
     reload: reloadGuilds,
   } = usePrivateGuilds(Boolean(useSupabaseAuth && myUserId), myUserId);
 
   activeGuildIdRef.current = activeGuildId;
+  selectedTextIdRef.current = selectedTextId;
 
   useLayoutEffect(() => {
     if (!useSupabaseAuth || !myUserId) {
@@ -160,6 +173,13 @@ export default function App() {
     lastGuildHydratedUserRef.current = myUserId;
     const stored = readStoredGuildIdForUser(myUserId);
     setActiveGuildId(stored);
+    if (stored) {
+      setAwaitingChannelSync(true);
+      setTextChannels([]);
+      setVoiceChannels([]);
+      setSelectedTextId("");
+      setMessages([]);
+    }
   }, [useSupabaseAuth, myUserId]);
 
   useEffect(() => {
@@ -191,6 +211,11 @@ export default function App() {
     if (!activeGuildId) return;
     if (privateGuildsList.length === 0) return;
     if (!privateGuildsList.some((g) => g.id === activeGuildId)) {
+      setAwaitingChannelSync(true);
+      setTextChannels([]);
+      setVoiceChannels([]);
+      setSelectedTextId("");
+      setMessages([]);
       setActiveGuildId(null);
       try {
         localStorage.removeItem(LAST_GUILD_STORAGE_KEY);
@@ -221,6 +246,12 @@ export default function App() {
     [socketUrl, useSupabaseAuth, accessToken]
   );
 
+  const { messages, sendChat, setMessages } = useServerTextChat({
+    socket,
+    activeGuildId,
+    selectedTextId,
+  });
+
   const onScreenShareEnd = useCallback(() => {
     setScreenOn(false);
     setCameraOn(false);
@@ -229,6 +260,7 @@ export default function App() {
   const voice = useVoiceConnection(socket, connectedVoiceId, identity || {}, {
     onScreenShareEnd,
     micSettings: voiceSettings,
+    voiceGuildId: activeGuildId,
   });
 
   const onPeerVolume = useCallback((peerId, volume) => {
@@ -267,16 +299,32 @@ export default function App() {
       setConnected(true);
     };
     const onChannelsConfig = (res) => {
-      setMessages([]);
-      // Ne pas écraser activeGuildId : la sélection vient du client (sidebar / localStorage).
+      const incoming = res?.guildId ?? null;
+      const mine = activeGuildIdRef.current ?? null;
+      if (incoming !== mine) return;
+
       setMyGuildRole(res?.myRole ?? null);
-      const t = normalizeChannelList(res?.text);
-      const v = normalizeChannelList(res?.voice);
-      if (t.length) {
+
+      // Lobby public : les salons viennent du socket.
+      if (mine === null) {
+        setAwaitingChannelSync(false);
+        const prevNorm = canonicalPublicTextChannelId(selectedTextIdRef.current);
+        const t = normalizeChannelList(res?.text);
+        const v = normalizeChannelList(res?.voice);
+        const keepMessages =
+          prevNorm !== "" && t.some((c) => canonicalPublicTextChannelId(c.id) === prevNorm);
+        if (!keepMessages) setMessages([]);
         setTextChannels(t);
-        setSelectedTextId((prev) => (t.some((c) => c.id === prev) ? prev : t[0].id));
+        setVoiceChannels(v);
+        setSelectedTextId((prev) => {
+          if (!t.length) return "";
+          return t.some((c) => c.id === prev) ? prev : t[0].id;
+        });
+        return;
       }
-      if (v.length) setVoiceChannels(v);
+
+      // Serveur privé : ne jamais appliquer text/voice depuis le socket (courses avec le lobby ou données retardées).
+      // Source de vérité : loadGuildChannelsFromSupabase + afterGuildChannelsChange.
     };
     const onDisconnect = () => setConnected(false);
     const onConnectError = (err) => {
@@ -317,32 +365,14 @@ export default function App() {
   useEffect(() => {
     if (!connected || !identity) return;
     socket.emit("guild:select", activeGuildId);
-  }, [connected, identity, activeGuildId, socket]);
-
-  useEffect(() => {
-    if (!connected || !identity || !selectedTextId.trim()) return;
-    socket.emit("text:join", selectedTextId);
-  }, [connected, identity, selectedTextId, socket]);
-
-  useEffect(() => {
-    if (!identity) return;
-    const onHistory = ({ channelId, guildId: g, messages: list }) => {
-      if (channelId !== selectedTextId) return;
-      if ((g ?? null) !== (activeGuildIdRef.current ?? null)) return;
-      setMessages(list);
-    };
-    const onMessage = ({ channelId, guildId: g, message }) => {
-      if (channelId !== selectedTextId) return;
-      if ((g ?? null) !== (activeGuildIdRef.current ?? null)) return;
-      setMessages((prev) => [...prev, message]);
-    };
-    socket.on("text:history", onHistory);
-    socket.on("text:message", onMessage);
-    return () => {
-      socket.off("text:history", onHistory);
-      socket.off("text:message", onMessage);
-    };
-  }, [identity, selectedTextId, socket]);
+    const t = buildTextChatTarget(activeGuildId, selectedTextId);
+    if (!t) return;
+    socket.emit("text:join", {
+      scope: t.scope,
+      guildId: t.scope === "guild" ? t.guildId : undefined,
+      channelId: t.channelId,
+    });
+  }, [connected, identity, activeGuildId, selectedTextId, socket]);
 
   const handleSelectText = useCallback((id) => {
     setSelectedTextId(id);
@@ -372,16 +402,24 @@ export default function App() {
   }, []);
 
   const handleSelectPublicLobby = useCallback(() => {
+    // Salons du lobby tout de suite (ne pas attendre channels:config : courses possibles privé → public).
+    setTextChannels(DEFAULT_TEXT.map((id) => ({ id, name: id })));
+    setVoiceChannels(DEFAULT_VOICE.map((id) => ({ id, name: id })));
+    setSelectedTextId("general");
+    setAwaitingChannelSync(false);
+    setMessages([]);
     setActiveGuildId(null);
     setConnectedVoiceId(null);
     setMainPane("text");
     setSelectedDmPeerId(null);
     setCameraOn(false);
     setScreenOn(false);
-    setSelectedTextId("general");
   }, []);
 
   const handleSelectPrivateGuild = useCallback((guildId) => {
+    setAwaitingChannelSync(true);
+    setTextChannels([]);
+    setVoiceChannels([]);
     setSelectedTextId("");
     setMessages([]);
     setActiveGuildId(guildId);
@@ -403,6 +441,9 @@ export default function App() {
       setMessages([]);
       const r = await createGuild(name, iconOpts);
       if (r?.ok && r.guildId) {
+        setAwaitingChannelSync(true);
+        setTextChannels([]);
+        setVoiceChannels([]);
         setActiveGuildId(r.guildId);
         setCreateGuildOpen(false);
       }
@@ -418,6 +459,9 @@ export default function App() {
       const inv = guildIncomingInvites.find((i) => i.id === inviteId);
       const r = await acceptGuildInvite(inviteId);
       if (r?.ok && inv?.guildId) {
+        setAwaitingChannelSync(true);
+        setTextChannels([]);
+        setVoiceChannels([]);
         setActiveGuildId(inv.guildId);
       }
       return r;
@@ -437,6 +481,79 @@ export default function App() {
       return sendGuildInvite(guildId, inviteeUserId);
     },
     [sendGuildInvite]
+  );
+
+  const refreshGuildSocketChannels = useCallback(() => {
+    if (socket.connected && activeGuildId) {
+      socket.emit("guild:select", activeGuildId);
+    }
+  }, [socket, activeGuildId]);
+
+  /** Liste salons serveur privé : uniquement Supabase (évite d’écraser avec le lobby public via le socket). */
+  const loadGuildChannelsFromSupabase = useCallback(async () => {
+    const gid = activeGuildId;
+    if (!gid) return;
+    if (!supabase) {
+      setAwaitingChannelSync(false);
+      return;
+    }
+    const seq = ++loadGuildChannelsSeqRef.current;
+    const { data, error } = await supabase
+      .from("guild_channels")
+      .select("id, name, kind")
+      .eq("guild_id", gid)
+      .order("position", { ascending: true });
+    if (seq !== loadGuildChannelsSeqRef.current) return;
+    if (activeGuildIdRef.current !== gid) return;
+    if (error) {
+      console.warn("guild_channels client refresh", error.message);
+      if (activeGuildIdRef.current === gid) setAwaitingChannelSync(false);
+      refreshGuildSocketChannels();
+      return;
+    }
+    const rows = data || [];
+    const t = normalizeChannelList(
+      rows.filter((c) => c.kind === "text").map((c) => ({ id: c.id, name: c.name }))
+    );
+    const v = normalizeChannelList(
+      rows.filter((c) => c.kind === "voice").map((c) => ({ id: c.id, name: c.name }))
+    );
+    setTextChannels(t);
+    setVoiceChannels(v);
+    setSelectedTextId((prev) => {
+      if (!t.length) return "";
+      return t.some((c) => c.id === prev) ? prev : t[0].id;
+    });
+    setAwaitingChannelSync(false);
+  }, [activeGuildId, supabase, refreshGuildSocketChannels]);
+
+  useEffect(() => {
+    if (!activeGuildId || !supabase) return;
+    void loadGuildChannelsFromSupabase();
+  }, [activeGuildId, supabase, loadGuildChannelsFromSupabase]);
+
+  const afterGuildChannelsChange = useCallback(() => {
+    if (!activeGuildId) {
+      refreshGuildSocketChannels();
+      return;
+    }
+    if (!supabase) {
+      setAwaitingChannelSync(false);
+      return;
+    }
+    void loadGuildChannelsFromSupabase();
+  }, [activeGuildId, supabase, loadGuildChannelsFromSupabase, refreshGuildSocketChannels]);
+
+  const handleDeleteGuildFromModal = useCallback(
+    async (guildId) => {
+      const r = await deleteGuild(guildId);
+      if (r?.ok) {
+        setManageGuildOpen(false);
+        handleSelectPublicLobby();
+      }
+      return r;
+    },
+    [deleteGuild, handleSelectPublicLobby]
   );
 
   const selectedTextLabel = useMemo(() => {
@@ -461,6 +578,62 @@ export default function App() {
     return privateGuildsList.find((x) => x.id === activeGuildId)?.name ?? "Serveur";
   }, [activeGuildId, privateGuildsList]);
 
+  /** Rôle depuis la liste Supabase (fiable) ; le socket peut encore être null au premier rendu. */
+  const effectiveGuildRole = useMemo(() => {
+    if (!activeGuildId) return null;
+    return privateGuildsList.find((g) => g.id === activeGuildId)?.myRole ?? myGuildRole ?? null;
+  }, [activeGuildId, privateGuildsList, myGuildRole]);
+
+  const canModerateGuild = Boolean(
+    activeGuildId && (effectiveGuildRole === "owner" || effectiveGuildRole === "admin")
+  );
+  const isGuildOwner = effectiveGuildRole === "owner";
+
+  const handleCreateGuildChannel = useCallback(
+    async (kind, name) => {
+      if (!activeGuildId) return { ok: false, message: "Aucun serveur sélectionné." };
+      const r = await addGuildChannel(activeGuildId, kind, name);
+      if (r.ok) afterGuildChannelsChange();
+      return r;
+    },
+    [activeGuildId, addGuildChannel, afterGuildChannelsChange]
+  );
+
+  const handleDeleteGuildChannel = useCallback(
+    async (channelId) => {
+      if (!activeGuildId) return { ok: false, message: "Aucun serveur sélectionné." };
+      const r = await deleteGuildChannel(activeGuildId, channelId);
+      if (r.ok) {
+        if (connectedVoiceId === channelId) {
+          setConnectedVoiceId(null);
+          setMainPane("text");
+        }
+        afterGuildChannelsChange();
+      }
+      return r;
+    },
+    [activeGuildId, deleteGuildChannel, afterGuildChannelsChange, connectedVoiceId]
+  );
+
+  const handleInviteToCurrentGuild = useCallback(
+    async (inviteeUserId) => {
+      if (!activeGuildId) return { ok: false, message: "Aucun serveur sélectionné." };
+      return sendGuildInvite(activeGuildId, inviteeUserId);
+    },
+    [activeGuildId, sendGuildInvite]
+  );
+
+  const handleDeleteCurrentGuildQuick = useCallback(async () => {
+    if (!activeGuildId || !isGuildOwner) return { ok: false, message: "Réservé au propriétaire." };
+    const ok = window.confirm(
+      `Supprimer définitivement le serveur « ${currentGuildName} » ?\nTous les salons, messages et membres seront effacés.`
+    );
+    if (!ok) return { ok: false, message: "Annulé." };
+    const r = await handleDeleteGuildFromModal(activeGuildId);
+    if (!r?.ok && r?.message) window.alert(r.message);
+    return r;
+  }, [activeGuildId, isGuildOwner, currentGuildName, handleDeleteGuildFromModal]);
+
   const handleSendFriendRequest = useCallback(
     async (raw) => {
       setFriendAddError(null);
@@ -469,13 +642,6 @@ export default function App() {
       return r;
     },
     [sendFriendRequest]
-  );
-
-  const sendChat = useCallback(
-    (text) => {
-      socket.emit("text:message", { text });
-    },
-    [socket]
   );
 
   const onToggleCamera = useCallback(
@@ -580,7 +746,12 @@ export default function App() {
           onCancelOutgoing={(id) => void cancelOutgoing(id)}
           serverSubtitle={serverSubtitle}
           activeGuildId={activeGuildId}
-          myGuildRole={myGuildRole}
+          canModerateGuild={canModerateGuild}
+          isGuildOwner={isGuildOwner}
+          onCreateGuildChannel={handleCreateGuildChannel}
+          onDeleteGuildChannel={handleDeleteGuildChannel}
+          onInviteToGuild={handleInviteToCurrentGuild}
+          onDeleteCurrentGuild={() => void handleDeleteCurrentGuildQuick()}
           incomingGuildInvites={guildIncomingInvites}
           onOpenManageGuild={() => setManageGuildOpen(true)}
           onAcceptGuildInvite={(id) => void handleAcceptGuildInvite(id)}
@@ -589,13 +760,31 @@ export default function App() {
           guildsLoadError={guildsLoadError}
         />
         <main className="flex min-w-0 flex-1 flex-col">
-          {mainPane === "text" && !selectedTextId.trim() ? (
+          {mainPane === "text" && !selectedTextId.trim() && awaitingChannelSync ? (
             <div className="flex min-h-0 flex-1 flex-col bg-discord-bg">
               <header className="flex h-12 shrink-0 items-center justify-end border-b border-discord-border bg-discord-elevated px-3">
                 {connectedUsersTab}
               </header>
               <div className="flex flex-1 items-center justify-center text-sm text-discord-muted">
                 Chargement des salons…
+              </div>
+            </div>
+          ) : null}
+          {mainPane === "text" &&
+          !selectedTextId.trim() &&
+          !awaitingChannelSync &&
+          activeGuildId &&
+          textChannels.length === 0 ? (
+            <div className="flex min-h-0 flex-1 flex-col bg-discord-bg">
+              <header className="flex h-12 shrink-0 items-center justify-end border-b border-discord-border bg-discord-elevated px-3">
+                {connectedUsersTab}
+              </header>
+              <div className="flex max-w-md flex-col items-center justify-center gap-3 px-6 text-center text-sm text-discord-muted">
+                <p className="text-discord-text">Ce serveur n’a encore aucun salon texte.</p>
+                <p>
+                  Ouvre <span className="font-medium text-discord-text">Gestion du serveur</span> dans la barre
+                  latérale pour créer ton premier salon.
+                </p>
               </div>
             </div>
           ) : null}
@@ -712,12 +901,15 @@ export default function App() {
         <GuildManageModal
           guildId={activeGuildId}
           guildName={currentGuildName}
-          myRole={myGuildRole}
+          myRole={effectiveGuildRole}
           myUserId={myUserId}
           friends={friends}
           onClose={() => setManageGuildOpen(false)}
           onChanged={() => void reloadGuilds()}
           onInvite={handleGuildInviteFromModal}
+          onDeleteChannel={handleDeleteGuildChannel}
+          onRefreshChannels={afterGuildChannelsChange}
+          onDeleteGuild={handleDeleteGuildFromModal}
         />
       ) : null}
     </div>

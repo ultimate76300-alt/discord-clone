@@ -134,6 +134,9 @@ const voiceChannelBySocket = new Map();
 /** @type {Map<string, string | null>} socketId -> guild uuid or null (public lobby) */
 const guildIdBySocket = new Map();
 
+/** Contexte chat texte courant (public vs guild) — dissocié de voice / guild:select seul. */
+const textChatBySocket = new Map();
+
 /** @type {Record<string, Array<{ id: string; clientId: string; displayName: string; avatarColor: string; avatarEmoji: string; avatarUrl?: string; text: string; ts: number }>>} */
 const messagesByChannel = {};
 
@@ -142,6 +145,68 @@ const VOICE_CHANNELS = ["Lobby", "Gaming", "Study"];
 
 const PUBLIC_TEXT_SET = new Set(TEXT_CHANNELS);
 const PUBLIC_VOICE_SET = new Set(VOICE_CHANNELS);
+
+function unwrapSocketArg(raw) {
+  if (Array.isArray(raw) && raw.length > 0) return unwrapSocketArg(raw[0]);
+  return raw;
+}
+
+/** Vocal : string ou { channelId }. */
+function parseChannelJoinPayload(raw) {
+  const p = unwrapSocketArg(raw);
+  if (typeof p === "string") {
+    return { channelId: p.trim() };
+  }
+  if (p && typeof p === "object" && typeof p.channelId === "string") {
+    return { channelId: p.channelId.trim() };
+  }
+  return { channelId: "" };
+}
+
+/**
+ * Texte : { scope: 'public', channelId } ou { scope: 'guild', guildId, channelId }.
+ * Pas d’ambiguïté avec le lobby public.
+ */
+function parseTextJoinPayload(raw) {
+  const p = unwrapSocketArg(raw);
+  if (!p || typeof p !== "object") return null;
+  if (p.scope !== "public" && p.scope !== "guild") return null;
+  const channelId = typeof p.channelId === "string" ? p.channelId.trim() : "";
+  if (!channelId) return null;
+  if (p.scope === "public") return { scope: "public", channelId };
+  const guildId = typeof p.guildId === "string" ? p.guildId.trim() : "";
+  if (!guildId) return null;
+  return { scope: "guild", guildId, channelId };
+}
+
+function resolvePublicTextChannelId(raw) {
+  const t = String(raw).trim().toLowerCase();
+  return PUBLIC_TEXT_SET.has(t) ? t : null;
+}
+
+function resolveGuildTextChannelId(channelId, textIdsSet) {
+  const t = channelId.trim();
+  if (textIdsSet.has(t)) return t;
+  const lower = t.toLowerCase();
+  for (const id of textIdsSet) {
+    if (String(id).toLowerCase() === lower) return id;
+  }
+  return null;
+}
+
+function leaveCurrentTextChat(socket) {
+  const ctx = textChatBySocket.get(socket.id);
+  if (ctx) {
+    const roomG = ctx.scope === "guild" ? ctx.guildId : null;
+    socket.leave(textRoom(roomG, ctx.channelId));
+  } else {
+    const g = guildIdBySocket.get(socket.id) ?? null;
+    const t = textChannelBySocket.get(socket.id);
+    if (t) socket.leave(textRoom(g, t));
+  }
+  textChannelBySocket.delete(socket.id);
+  textChatBySocket.delete(socket.id);
+}
 
 TEXT_CHANNELS.forEach((id) => {
   const k = `p:${id}`;
@@ -160,14 +225,22 @@ function msgKey(guildId, channelId) {
   return guildId ? `g:${guildId}:${channelId}` : `p:${channelId}`;
 }
 
+function emptyGuildChannelMeta() {
+  return { textIds: new Set(), voiceIds: new Set(), text: [], voice: [] };
+}
+
 async function loadGuildChannelMeta(guildId) {
-  if (!supabaseServer || !guildId) return null;
+  if (!supabaseServer || !guildId) return emptyGuildChannelMeta();
   const { data: channels, error } = await supabaseServer
     .from("guild_channels")
     .select("id, name, kind")
     .eq("guild_id", guildId)
     .order("position", { ascending: true });
-  if (error || !channels?.length) return null;
+  if (error) {
+    console.warn("loadGuildChannelMeta", error.message);
+    return emptyGuildChannelMeta();
+  }
+  if (!channels?.length) return emptyGuildChannelMeta();
   const textIds = new Set();
   const voiceIds = new Set();
   const text = [];
@@ -269,6 +342,18 @@ function sanitizeAvatarUrl(raw) {
   }
 }
 
+/** Les handlers async libèrent le thread Node entre deux await : sans ça, text:join peut passer avant la fin de guild:select et joindre le mauvais salon (ex. public + privé mélangés). */
+const socketOpQueues = new Map();
+
+function enqueueSocketOp(socketId, fn) {
+  const prev = socketOpQueues.get(socketId) ?? Promise.resolve();
+  const next = prev
+    .then(() => fn())
+    .catch((e) => console.error("socket op queue", socketId, e));
+  socketOpQueues.set(socketId, next);
+  return next;
+}
+
 io.on("connection", (socket) => {
   guildIdBySocket.set(socket.id, null);
   // Pas de channels:config ici : le client envoie guild:select (null ou uuid) pour éviter
@@ -298,100 +383,152 @@ io.on("connection", (socket) => {
     broadcastPresence();
   });
 
-  socket.on("guild:select", async (raw) => {
-    const guildId =
-      raw === null || raw === undefined || raw === ""
-        ? null
-        : typeof raw === "string"
-          ? raw
-          : null;
-    const oldG = guildIdBySocket.get(socket.id) ?? null;
+  socket.on("guild:select", (raw) => {
+    void enqueueSocketOp(socket.id, async () => {
+      const guildId =
+        raw === null || raw === undefined || raw === ""
+          ? null
+          : typeof raw === "string"
+            ? raw
+            : null;
+      const oldG = guildIdBySocket.get(socket.id) ?? null;
 
-    const vCh = voiceChannelBySocket.get(socket.id);
-    if (vCh) {
-      socket.leave(voiceRoom(oldG, vCh));
-      socket.to(voiceRoom(oldG, vCh)).emit("voice:peer-left", { socketId: socket.id });
-      voiceChannelBySocket.set(socket.id, null);
-    }
-
-    const tCh = textChannelBySocket.get(socket.id);
-    if (tCh) {
-      socket.leave(textRoom(oldG, tCh));
-      textChannelBySocket.delete(socket.id);
-    }
-
-    if (!guildId) {
-      guildIdBySocket.set(socket.id, null);
-      socket.emit("channels:config", {
-        guildId: null,
-        text: TEXT_CHANNELS,
-        voice: VOICE_CHANNELS,
-        myRole: null,
-      });
-      return;
-    }
-
-    const userId = socket.data.supabaseUserId;
-    if (!userId || !supabaseServer) return;
-
-    try {
-      const role = await verifyGuildMember(guildId, userId);
-      if (!role) return;
-      guildIdBySocket.set(socket.id, guildId);
-      const meta = await loadGuildChannelMeta(guildId);
-      if (!meta) return;
-      socket.emit("channels:config", {
-        guildId,
-        text: meta.text,
-        voice: meta.voice,
-        myRole: role,
-      });
-    } catch (e) {
-      console.error("guild:select", e);
-    }
-  });
-
-  socket.on("text:join", async (channelId) => {
-    if (typeof channelId !== "string" || !channelId.trim()) return;
-    const guildId = guildIdBySocket.get(socket.id) ?? null;
-
-    try {
-      if (guildId) {
-        if (!supabaseServer) return;
-        const meta = await loadGuildChannelMeta(guildId);
-        if (!meta || !meta.textIds.has(channelId)) return;
-      } else if (!PUBLIC_TEXT_SET.has(channelId)) {
+      // Resélection du même serveur : pousser la liste à jour sans quitter les rooms texte/vocal
+      if (guildId && oldG === guildId) {
+        const userId = socket.data.supabaseUserId;
+        if (!userId || !supabaseServer) return;
+        try {
+          const role = await verifyGuildMember(guildId, userId);
+          if (!role) return;
+          const meta = await loadGuildChannelMeta(guildId);
+          socket.emit("channels:config", {
+            guildId,
+            text: meta.text,
+            voice: meta.voice,
+            myRole: role,
+          });
+        } catch (e) {
+          console.error("guild:select", e);
+        }
         return;
       }
 
-      const prevCh = textChannelBySocket.get(socket.id);
-      const prevG = guildIdBySocket.get(socket.id) ?? null;
-      if (prevCh) socket.leave(textRoom(prevG, prevCh));
-
-      textChannelBySocket.set(socket.id, channelId);
-      socket.join(textRoom(guildId, channelId));
-
-      let history = [];
-      if (guildId && supabaseServer) {
-        history = await fetchGuildMessageHistory(channelId);
-      } else {
-        history = messagesByChannel[msgKey(null, channelId)] || [];
+      if (!guildId) {
+        const vCh = voiceChannelBySocket.get(socket.id);
+        if (vCh) {
+          socket.leave(voiceRoom(oldG, vCh));
+          socket.to(voiceRoom(oldG, vCh)).emit("voice:peer-left", { socketId: socket.id });
+          voiceChannelBySocket.set(socket.id, null);
+        }
+        leaveCurrentTextChat(socket);
+        guildIdBySocket.set(socket.id, null);
+        socket.emit("channels:config", {
+          guildId: null,
+          text: TEXT_CHANNELS,
+          voice: VOICE_CHANNELS,
+          myRole: null,
+        });
+        return;
       }
-      socket.emit("text:history", { channelId, guildId, messages: history });
-    } catch (e) {
-      console.error("text:join", e);
-    }
+
+      const userId = socket.data.supabaseUserId;
+      if (!userId || !supabaseServer) return;
+
+      try {
+        const role = await verifyGuildMember(guildId, userId);
+        if (!role) return;
+
+        const vCh = voiceChannelBySocket.get(socket.id);
+        if (vCh) {
+          socket.leave(voiceRoom(oldG, vCh));
+          socket.to(voiceRoom(oldG, vCh)).emit("voice:peer-left", { socketId: socket.id });
+          voiceChannelBySocket.set(socket.id, null);
+        }
+        leaveCurrentTextChat(socket);
+
+        guildIdBySocket.set(socket.id, guildId);
+        const meta = await loadGuildChannelMeta(guildId);
+        socket.emit("channels:config", {
+          guildId,
+          text: meta.text,
+          voice: meta.voice,
+          myRole: role,
+        });
+      } catch (e) {
+        console.error("guild:select", e);
+      }
+    });
+  });
+
+  socket.on("text:join", (rawPayload) => {
+    void enqueueSocketOp(socket.id, async () => {
+      const parsed = parseTextJoinPayload(rawPayload);
+      if (!parsed) return;
+
+      const socketGuild = guildIdBySocket.get(socket.id) ?? null;
+
+      try {
+        if (parsed.scope === "public") {
+          if (socketGuild !== null) return;
+          const ch = resolvePublicTextChannelId(parsed.channelId);
+          if (!ch) return;
+
+          leaveCurrentTextChat(socket);
+          textChatBySocket.set(socket.id, { scope: "public", channelId: ch });
+          textChannelBySocket.set(socket.id, ch);
+          socket.join(textRoom(null, ch));
+
+          const history = messagesByChannel[msgKey(null, ch)] || [];
+          socket.emit("text:history", {
+            scope: "public",
+            guildId: null,
+            channelId: ch,
+            messages: history,
+          });
+          return;
+        }
+
+        if (parsed.scope === "guild") {
+          if (parsed.guildId !== socketGuild) return;
+          const uid = socket.data.supabaseUserId;
+          if (!uid || !supabaseServer) return;
+          const membership = await verifyGuildMember(parsed.guildId, uid);
+          if (!membership) return;
+          const meta = await loadGuildChannelMeta(parsed.guildId);
+          const resolvedCh = resolveGuildTextChannelId(parsed.channelId, meta.textIds);
+          if (!resolvedCh) return;
+
+          leaveCurrentTextChat(socket);
+          textChatBySocket.set(socket.id, {
+            scope: "guild",
+            guildId: parsed.guildId,
+            channelId: resolvedCh,
+          });
+          textChannelBySocket.set(socket.id, resolvedCh);
+          socket.join(textRoom(parsed.guildId, resolvedCh));
+
+          const history = await fetchGuildMessageHistory(resolvedCh);
+          socket.emit("text:history", {
+            scope: "guild",
+            guildId: parsed.guildId,
+            channelId: resolvedCh,
+            messages: history,
+          });
+        }
+      } catch (e) {
+        console.error("text:join", e);
+      }
+    });
   });
 
   socket.on("text:message", (payload) => {
-    void (async () => {
+    void enqueueSocketOp(socket.id, async () => {
       const profile = identities.get(socket.id);
       if (!profile) return;
-      const channelId = textChannelBySocket.get(socket.id);
-      if (!channelId || typeof payload?.text !== "string") return;
+      const ctx = textChatBySocket.get(socket.id);
+      if (!ctx || typeof payload?.text !== "string") return;
       const text = payload.text.trim().slice(0, 2000);
       if (!text) return;
-      const guildId = guildIdBySocket.get(socket.id) ?? null;
 
       const msg = {
         id: `${Date.now()}-${socket.id}`,
@@ -404,13 +541,32 @@ io.on("connection", (socket) => {
         ts: Date.now(),
       };
 
-      const room = textRoom(guildId, channelId);
+      if (ctx.scope === "public") {
+        const ch = ctx.channelId;
+        const room = textRoom(null, ch);
+        const key = msgKey(null, ch);
+        const list = messagesByChannel[key];
+        if (!list) return;
+        list.push(msg);
+        if (list.length > 500) list.splice(0, list.length - 500);
+        io.to(room).emit("text:message", {
+          scope: "public",
+          guildId: null,
+          channelId: ch,
+          message: msg,
+        });
+        return;
+      }
 
-      if (guildId) {
+      if (ctx.scope === "guild") {
+        const { guildId, channelId } = ctx;
+        const room = textRoom(guildId, channelId);
         const userId = socket.data.supabaseUserId;
         if (!userId || !supabaseServer) return;
+        const membership = await verifyGuildMember(guildId, userId);
+        if (!membership) return;
         const meta = await loadGuildChannelMeta(guildId);
-        if (!meta || !meta.textIds.has(channelId)) return;
+        if (!meta.textIds.has(channelId)) return;
         const { data: row, error } = await supabaseServer
           .from("guild_messages")
           .insert({
@@ -426,66 +582,73 @@ io.on("connection", (socket) => {
         }
         msg.id = row.id;
         msg.ts = new Date(row.created_at).getTime();
-        io.to(room).emit("text:message", { channelId, guildId, message: msg });
-        return;
+        io.to(room).emit("text:message", {
+          scope: "guild",
+          guildId,
+          channelId,
+          message: msg,
+        });
       }
-
-      const key = msgKey(null, channelId);
-      const list = messagesByChannel[key];
-      if (!list) return;
-      list.push(msg);
-      if (list.length > 500) list.splice(0, list.length - 500);
-      io.to(room).emit("text:message", { channelId, guildId: null, message: msg });
-    })();
+    });
   });
 
-  socket.on("voice:join", async (channelId) => {
-    if (typeof channelId !== "string" || !channelId.trim()) return;
-    const guildId = guildIdBySocket.get(socket.id) ?? null;
+  socket.on("voice:join", (rawPayload) => {
+    void enqueueSocketOp(socket.id, async () => {
+      const { channelId } = parseChannelJoinPayload(rawPayload);
+      if (!channelId) return;
+      const guildId = guildIdBySocket.get(socket.id) ?? null;
 
-    try {
-      if (guildId) {
-        if (!supabaseServer) return;
-        const meta = await loadGuildChannelMeta(guildId);
-        if (!meta || !meta.voiceIds.has(channelId)) return;
-      } else if (!PUBLIC_VOICE_SET.has(channelId)) {
-        return;
+      if (guildId && PUBLIC_VOICE_SET.has(channelId)) return;
+      if (!guildId && !PUBLIC_VOICE_SET.has(channelId)) return;
+
+      try {
+        if (guildId) {
+          if (!supabaseServer) return;
+          const uid = socket.data.supabaseUserId;
+          if (!uid) return;
+          const membership = await verifyGuildMember(guildId, uid);
+          if (!membership) return;
+          const meta = await loadGuildChannelMeta(guildId);
+          if (!meta || !meta.voiceIds.has(channelId)) return;
+        }
+
+        const prev = voiceChannelBySocket.get(socket.id);
+        const prevG = guildIdBySocket.get(socket.id) ?? null;
+        if (prev) {
+          socket.leave(voiceRoom(prevG, prev));
+          socket.to(voiceRoom(prevG, prev)).emit("voice:peer-left", { socketId: socket.id });
+        }
+
+        voiceChannelBySocket.set(socket.id, channelId);
+        socket.join(voiceRoom(guildId, channelId));
+        const profile = identities.get(socket.id);
+        if (!profile) return;
+
+        const existing = getVoicePeers(channelId, socket.id, guildId);
+        socket.emit("voice:peers", {
+          channelId,
+          peers: existing,
+        });
+
+        socket.to(voiceRoom(guildId, channelId)).emit("voice:peer-joined", {
+          channelId,
+          peer: { socketId: socket.id, ...profile },
+        });
+      } catch (e) {
+        console.error("voice:join", e);
       }
-
-      const prev = voiceChannelBySocket.get(socket.id);
-      const prevG = guildIdBySocket.get(socket.id) ?? null;
-      if (prev) {
-        socket.leave(voiceRoom(prevG, prev));
-        socket.to(voiceRoom(prevG, prev)).emit("voice:peer-left", { socketId: socket.id });
-      }
-
-      voiceChannelBySocket.set(socket.id, channelId);
-      socket.join(voiceRoom(guildId, channelId));
-      const profile = identities.get(socket.id);
-      if (!profile) return;
-
-      const existing = getVoicePeers(channelId, socket.id, guildId);
-      socket.emit("voice:peers", {
-        channelId,
-        peers: existing,
-      });
-
-      socket.to(voiceRoom(guildId, channelId)).emit("voice:peer-joined", {
-        channelId,
-        peer: { socketId: socket.id, ...profile },
-      });
-    } catch (e) {
-      console.error("voice:join", e);
-    }
+    });
   });
 
   socket.on("voice:leave", () => {
-    const ch = voiceChannelBySocket.get(socket.id);
-    if (!ch) return;
-    const g = guildIdBySocket.get(socket.id) ?? null;
-    socket.leave(voiceRoom(g, ch));
-    voiceChannelBySocket.set(socket.id, null);
-    socket.to(voiceRoom(g, ch)).emit("voice:peer-left", { socketId: socket.id });
+    void enqueueSocketOp(socket.id, async () => {
+      const ch = voiceChannelBySocket.get(socket.id);
+      if (!ch) return;
+      const g = guildIdBySocket.get(socket.id) ?? null;
+      socket.leave(voiceRoom(g, ch));
+      voiceChannelBySocket.set(socket.id, null);
+      socket.to(voiceRoom(g, ch)).emit("voice:peer-left", { socketId: socket.id });
+    });
   });
 
   socket.on("webrtc:offer", (payload) => {
@@ -514,11 +677,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    const g = guildIdBySocket.get(socket.id) ?? null;
-    const t = textChannelBySocket.get(socket.id);
-    if (t) socket.leave(textRoom(g, t));
-    textChannelBySocket.delete(socket.id);
+    socketOpQueues.delete(socket.id);
+    leaveCurrentTextChat(socket);
 
+    const g = guildIdBySocket.get(socket.id) ?? null;
     const v = voiceChannelBySocket.get(socket.id);
     if (v) {
       socket.to(voiceRoom(g, v)).emit("voice:peer-left", { socketId: socket.id });

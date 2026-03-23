@@ -300,12 +300,6 @@ export function usePrivateGuilds(enabled, userId) {
       });
       if (mem.error) return { ok: false, message: mem.error.message };
 
-      const ch = await supabase.from("guild_channels").insert([
-        { guild_id: gid, name: "général", kind: "text", position: 0 },
-        { guild_id: gid, name: "Salon vocal", kind: "voice", position: 1 },
-      ]);
-      if (ch.error) return { ok: false, message: ch.error.message };
-
       const gidStr = normalizeGuildId(gid);
       if (!gidStr) return { ok: false, message: "Id serveur invalide" };
 
@@ -367,6 +361,56 @@ export function usePrivateGuilds(enabled, userId) {
     [load, userId]
   );
 
+  const deleteGuild = useCallback(
+    async (guildId) => {
+      if (!supabase || !userId) return { ok: false, message: "Non connecté" };
+      const gid = normalizeGuildId(guildId);
+      if (!gid) return { ok: false, message: "Serveur invalide" };
+      const { error: e } = await supabase.from("guilds").delete().eq("id", gid).eq("owner_id", userId);
+      if (e) return { ok: false, message: e.message };
+      setGuilds((prev) => prev.filter((g) => g.id !== gid));
+      await load();
+      return { ok: true };
+    },
+    [userId, load]
+  );
+
+  const addGuildChannel = useCallback(
+    async (guildId, kind, rawName) => {
+      if (!supabase || !userId) return { ok: false, message: "Non connecté" };
+      const gid = normalizeGuildId(guildId);
+      if (!gid) return { ok: false, message: "Serveur invalide" };
+      const t = (typeof rawName === "string" ? rawName : "").trim();
+      if (t.length < 1 || t.length > 64) return { ok: false, message: "Nom du salon : 1 à 64 caractères." };
+      if (kind !== "text" && kind !== "voice") return { ok: false, message: "Type de salon invalide." };
+      const { data: rows, error: qErr } = await supabase.from("guild_channels").select("position").eq("guild_id", gid);
+      if (qErr) return { ok: false, message: qErr.message };
+      const maxP = Math.max(-1, ...(rows || []).map((r) => r.position ?? 0));
+      const { error: e } = await supabase.from("guild_channels").insert({
+        guild_id: gid,
+        name: t,
+        kind,
+        position: maxP + 1,
+      });
+      if (e) return { ok: false, message: e.message };
+      return { ok: true };
+    },
+    [userId]
+  );
+
+  const deleteGuildChannel = useCallback(
+    async (guildId, channelId) => {
+      if (!supabase || !userId) return { ok: false, message: "Non connecté" };
+      const gid = normalizeGuildId(guildId);
+      const cid = normalizeGuildId(channelId);
+      if (!gid || !cid) return { ok: false, message: "Paramètres invalides." };
+      const { error: e } = await supabase.from("guild_channels").delete().eq("id", cid).eq("guild_id", gid);
+      if (e) return { ok: false, message: e.message };
+      return { ok: true };
+    },
+    [userId]
+  );
+
   return {
     guilds,
     incomingInvites,
@@ -378,5 +422,8 @@ export function usePrivateGuilds(enabled, userId) {
     sendGuildInvite,
     acceptGuildInvite,
     declineGuildInvite,
+    deleteGuild,
+    addGuildChannel,
+    deleteGuildChannel,
   };
 }

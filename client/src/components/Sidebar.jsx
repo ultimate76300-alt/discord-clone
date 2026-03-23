@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BrandMark } from "./BrandMark";
+import { GuildServerManageMenu } from "./GuildServerManageMenu";
 
 function ChannelIcon({ hash }) {
   return (
@@ -32,7 +33,12 @@ export function Sidebar({
   onCancelOutgoing,
   serverSubtitle = "Lobby public",
   activeGuildId = null,
-  myGuildRole = null,
+  canModerateGuild = false,
+  isGuildOwner = false,
+  onCreateGuildChannel,
+  onDeleteGuildChannel,
+  onInviteToGuild,
+  onDeleteCurrentGuild,
   incomingGuildInvites = [],
   onOpenManageGuild,
   onAcceptGuildInvite,
@@ -54,6 +60,23 @@ export function Sidebar({
         </div>
       </div>
 
+      {friendsEnabled && activeGuildId && canModerateGuild ? (
+        <div className="border-b border-discord-border px-2 py-2">
+          <GuildServerManageMenu
+            guildId={activeGuildId}
+            isGuildOwner={isGuildOwner}
+            textChannels={textChannels}
+            voiceChannels={voiceChannels}
+            friends={friends}
+            onCreateGuildChannel={onCreateGuildChannel}
+            onDeleteGuildChannel={onDeleteGuildChannel}
+            onInviteToGuild={onInviteToGuild}
+            onOpenMembersManage={() => onOpenManageGuild?.()}
+            onDeleteServer={() => void onDeleteCurrentGuild?.()}
+          />
+        </div>
+      ) : null}
+
       <nav className="scroll-discord flex-1 overflow-y-auto px-2 py-3">
         {friendsEnabled ? (
           <>
@@ -72,18 +95,6 @@ export function Sidebar({
               <div className="mb-3 rounded-md border border-red-500/35 bg-red-950/40 px-2 py-2 text-[11px] leading-snug text-red-100/95">
                 <p className="font-semibold text-red-200">Serveurs privés</p>
                 <p className="mt-1 text-red-100/90">{guildsLoadError}</p>
-              </div>
-            ) : null}
-
-            {activeGuildId && (myGuildRole === "owner" || myGuildRole === "admin") ? (
-              <div className="mb-3">
-                <button
-                  type="button"
-                  onClick={() => onOpenManageGuild?.()}
-                  className="w-full rounded-md border border-discord-border bg-discord-card/60 px-2 py-2 text-left text-xs text-discord-text hover:bg-discord-hover"
-                >
-                  Gérer ce serveur
-                </button>
               </div>
             ) : null}
 
@@ -250,6 +261,12 @@ export function Sidebar({
           Text channels
         </div>
         <ul className="space-y-0.5">
+          {friendsEnabled && activeGuildId && textChannels.length === 0 ? (
+            <li className="px-2 py-2 text-[11px] leading-snug text-discord-muted">
+              Aucun salon texte. Utilise <span className="text-discord-text">Gestion du serveur</span> pour en
+              ajouter.
+            </li>
+          ) : null}
           {textChannels.map((c) => {
             const id = typeof c === "string" ? c : c.id;
             const label = typeof c === "string" ? c : c.name;
@@ -276,6 +293,11 @@ export function Sidebar({
           Voice channels
         </div>
         <ul className="space-y-0.5">
+          {friendsEnabled && activeGuildId && voiceChannels.length === 0 ? (
+            <li className="px-2 py-2 text-[11px] leading-snug text-discord-muted">
+              Aucun salon vocal. Ajoute-en un via <span className="text-discord-text">Gestion du serveur</span>.
+            </li>
+          ) : null}
           {voiceChannels.map((c) => {
             const id = typeof c === "string" ? c : c.id;
             const label = typeof c === "string" ? c : c.name;

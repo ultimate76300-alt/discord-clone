@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { AvatarBubble } from "./AvatarBubble";
 
@@ -11,19 +11,31 @@ export function GuildManageModal({
   onClose,
   onChanged,
   onInvite,
+  onDeleteChannel,
+  onRefreshChannels,
+  onDeleteGuild,
 }) {
   const [members, setMembers] = useState([]);
+  const [channels, setChannels] = useState({ text: [], voice: [] });
   const [loading, setLoading] = useState(true);
   const [inviteUserId, setInviteUserId] = useState("");
+  const [newTextName, setNewTextName] = useState("");
+  const [newVoiceName, setNewVoiceName] = useState("");
+  const [purgeName, setPurgeName] = useState("");
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
+  const [channelBusy, setChannelBusy] = useState(false);
 
-  const canModerate = myRole === "owner" || myRole === "admin";
-  const isOwner = myRole === "owner";
+  const resolvedRole = useMemo(() => {
+    const self = members.find((m) => m.userId === myUserId);
+    return self?.role ?? myRole;
+  }, [members, myUserId, myRole]);
+
+  const canModerate = resolvedRole === "owner" || resolvedRole === "admin";
+  const isOwner = resolvedRole === "owner";
 
   const loadMembers = useCallback(async () => {
     if (!guildId || !supabase) return;
-    setLoading(true);
     setErr(null);
     try {
       const { data: mems, error: qErr } = await supabase
@@ -61,14 +73,41 @@ export function GuildManageModal({
     } catch (e) {
       setErr(e?.message || "Chargement impossible");
       setMembers([]);
-    } finally {
-      setLoading(false);
+    }
+  }, [guildId]);
+
+  const loadChannels = useCallback(async () => {
+    if (!guildId || !supabase) return;
+    try {
+      const { data, error: qErr } = await supabase
+        .from("guild_channels")
+        .select("id, name, kind, position")
+        .eq("guild_id", guildId)
+        .order("position", { ascending: true });
+      if (qErr) throw qErr;
+      const rows = data || [];
+      setChannels({
+        text: rows.filter((c) => c.kind === "text"),
+        voice: rows.filter((c) => c.kind === "voice"),
+      });
+    } catch (e) {
+      setChannels({ text: [], voice: [] });
     }
   }, [guildId]);
 
   useEffect(() => {
-    void loadMembers();
-  }, [loadMembers]);
+    if (!guildId || !supabase) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      await loadMembers();
+      await loadChannels();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [guildId, loadMembers, loadChannels]);
 
   const friendsNotInGuild = friends.filter((f) => !members.some((m) => m.userId === f.id));
 
@@ -83,6 +122,49 @@ export function GuildManageModal({
     } else {
       setErr(r?.message || "Invitation refusée");
     }
+  }
+
+  async function addChannel(kind) {
+    const raw = kind === "text" ? newTextName : newVoiceName;
+    const t = raw.trim();
+    if (t.length < 1 || t.length > 64) {
+      setErr("Nom du salon : 1 à 64 caractères.");
+      return;
+    }
+    if (!supabase) return;
+    setErr(null);
+    setChannelBusy(true);
+    try {
+      const { data: rows } = await supabase.from("guild_channels").select("position").eq("guild_id", guildId);
+      const maxP = Math.max(-1, ...(rows || []).map((r) => r.position ?? 0));
+      const { error: e } = await supabase.from("guild_channels").insert({
+        guild_id: guildId,
+        name: t,
+        kind,
+        position: maxP + 1,
+      });
+      if (e) {
+        setErr(e.message);
+        return;
+      }
+      if (kind === "text") setNewTextName("");
+      else setNewVoiceName("");
+      await loadChannels();
+      onRefreshChannels?.();
+    } finally {
+      setChannelBusy(false);
+    }
+  }
+
+  async function handleDeleteServer() {
+    setErr(null);
+    setMsg(null);
+    if (purgeName.trim() !== guildName.trim()) {
+      setErr("Tape exactement le nom du serveur pour confirmer la suppression.");
+      return;
+    }
+    const r = await onDeleteGuild?.(guildId);
+    if (!r?.ok) setErr(r?.message || "Suppression impossible");
   }
 
   async function setRole(targetId, newRole) {
@@ -122,15 +204,93 @@ export function GuildManageModal({
       aria-modal="true"
       aria-labelledby="guild-manage-title"
     >
-      <div className="flex max-h-[min(90dvh,36rem)] w-full max-w-lg flex-col rounded-xl border border-discord-border bg-discord-sidebar shadow-2xl">
+      <div className="flex max-h-[min(90dvh,40rem)] w-full max-w-lg flex-col rounded-xl border border-discord-border bg-discord-sidebar shadow-2xl">
         <div className="border-b border-discord-border px-5 py-4">
           <h2 id="guild-manage-title" className="text-lg font-semibold text-discord-text">
             {guildName}
           </h2>
-          <p className="text-xs text-discord-muted">Membres, invitations et rôles</p>
+          <p className="text-xs text-discord-muted">Salons, membres, invitations</p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto scroll-discord px-5 py-4">
+          {canModerate ? (
+            <div className="mb-4 space-y-3 rounded-lg border border-discord-border bg-discord-elevated/80 p-3">
+              <p className="text-xs font-semibold uppercase text-discord-muted">Salons texte</p>
+              <ul className="space-y-1 text-sm text-discord-muted">
+                {channels.text.map((c) => (
+                  <li key={c.id} className="flex items-center gap-2 text-discord-text">
+                    <span aria-hidden>#</span>
+                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                    {onDeleteChannel ? (
+                      <button
+                        type="button"
+                        disabled={channelBusy}
+                        onClick={() => void deleteChannelRow(c)}
+                        className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium text-red-300 hover:bg-red-950/35 disabled:opacity-40"
+                      >
+                        Supprimer
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <input
+                  value={newTextName}
+                  onChange={(e) => setNewTextName(e.target.value)}
+                  maxLength={64}
+                  placeholder="Nouveau salon texte"
+                  className="min-w-0 flex-1 rounded bg-discord-input px-2 py-1.5 text-sm text-discord-text outline-none placeholder:text-discord-muted/60"
+                />
+                <button
+                  type="button"
+                  disabled={channelBusy || !newTextName.trim()}
+                  onClick={() => void addChannel("text")}
+                  className="shrink-0 rounded bg-discord-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-discord-accent/90 disabled:opacity-40"
+                >
+                  Ajouter
+                </button>
+              </div>
+
+              <p className="pt-2 text-xs font-semibold uppercase text-discord-muted">Salons vocaux</p>
+              <ul className="space-y-1 text-sm text-discord-muted">
+                {channels.voice.map((c) => (
+                  <li key={c.id} className="flex items-center gap-2 text-discord-text">
+                    <span aria-hidden>🔊</span>
+                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                    {onDeleteChannel ? (
+                      <button
+                        type="button"
+                        disabled={channelBusy}
+                        onClick={() => void deleteChannelRow(c)}
+                        className="shrink-0 rounded px-2 py-0.5 text-[11px] font-medium text-red-300 hover:bg-red-950/35 disabled:opacity-40"
+                      >
+                        Supprimer
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <div className="flex gap-2">
+                <input
+                  value={newVoiceName}
+                  onChange={(e) => setNewVoiceName(e.target.value)}
+                  maxLength={64}
+                  placeholder="Nouveau salon vocal"
+                  className="min-w-0 flex-1 rounded bg-discord-input px-2 py-1.5 text-sm text-discord-text outline-none placeholder:text-discord-muted/60"
+                />
+                <button
+                  type="button"
+                  disabled={channelBusy || !newVoiceName.trim()}
+                  onClick={() => void addChannel("voice")}
+                  className="shrink-0 rounded bg-discord-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-discord-accent/90 disabled:opacity-40"
+                >
+                  Ajouter
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {canModerate && friendsNotInGuild.length > 0 ? (
             <div className="mb-4 rounded-lg border border-discord-border bg-discord-elevated/80 p-3">
               <p className="text-xs font-semibold uppercase text-discord-muted">Inviter un ami</p>
@@ -171,7 +331,7 @@ export function GuildManageModal({
                 const canKick =
                   !self &&
                   m.role !== "owner" &&
-                  (isOwner || (myRole === "admin" && m.role === "member"));
+                  (isOwner || (resolvedRole === "admin" && m.role === "member"));
                 const canPromote =
                   isOwner && !self && m.role !== "owner" && m.role === "member";
                 const canDemote = isOwner && !self && m.role === "admin";
@@ -231,6 +391,32 @@ export function GuildManageModal({
               })}
             </ul>
           )}
+
+          {isOwner && onDeleteGuild ? (
+            <div className="mt-6 rounded-lg border border-red-500/35 bg-red-950/25 p-3">
+              <p className="text-xs font-semibold uppercase text-red-200">Zone de danger</p>
+              <p className="mt-1 text-[11px] leading-snug text-red-100/85">
+                Supprimer ce serveur efface tous les salons, messages et membres. Irréversible.
+              </p>
+              <label className="mt-2 block text-[11px] text-red-100/90">
+                Tape le nom exact du serveur pour confirmer
+                <input
+                  value={purgeName}
+                  onChange={(e) => setPurgeName(e.target.value)}
+                  className="mt-1 w-full rounded border border-red-500/30 bg-discord-input px-2 py-1.5 text-sm text-discord-text outline-none"
+                  placeholder={guildName}
+                  autoComplete="off"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleDeleteServer()}
+                className="mt-2 w-full rounded border border-red-500/50 bg-red-950/50 py-2 text-sm font-medium text-red-200 hover:bg-red-900/50"
+              >
+                Supprimer le serveur
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="border-t border-discord-border px-5 py-3">

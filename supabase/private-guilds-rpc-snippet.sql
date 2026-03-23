@@ -26,10 +26,6 @@ begin
   insert into public.guild_members (guild_id, user_id, role)
   values (gid, me, 'owner');
 
-  insert into public.guild_channels (guild_id, name, kind, position) values
-    (gid, 'général', 'text', 0),
-    (gid, 'Salon vocal', 'voice', 1);
-
   return gid;
 end;
 $$;

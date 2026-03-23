@@ -11,6 +11,8 @@ import {
   playVoiceSelfJoinChime,
 } from "../lib/voiceChimes";
 
+const PUBLIC_LOBBY_VOICE_IDS = new Set(["Lobby", "Gaming", "Study"]);
+
 function tuneVideoTrackContentHint(track) {
   if (!track || track.kind !== "video") return;
   try {
@@ -88,7 +90,7 @@ function buildAudioConstraints(settings) {
 }
 
 export function useVoiceConnection(socket, voiceChannelId, profile, options = {}) {
-  const { onScreenShareEnd, micSettings = DEFAULT_VOICE_SETTINGS } = options;
+  const { onScreenShareEnd, micSettings = DEFAULT_VOICE_SETTINGS, voiceGuildId = null } = options;
   const [remoteStreams, setRemoteStreams] = useState(() => new Map());
   const [peerMeta, setPeerMeta] = useState(() => new Map());
   const [localRenderTick, setLocalRenderTick] = useState(0);
@@ -565,7 +567,12 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           avatarEmoji: profileRef.current.avatarEmoji,
           avatarUrl: profileRef.current.avatarUrl ?? "",
         });
-        socket.emit("voice:join", voiceChannelId);
+        if (voiceGuildId && PUBLIC_LOBBY_VOICE_IDS.has(voiceChannelId)) return;
+        if (!voiceGuildId && !PUBLIC_LOBBY_VOICE_IDS.has(voiceChannelId)) return;
+        socket.emit("voice:join", {
+          channelId: voiceChannelId,
+          guildId: voiceGuildId ?? null,
+        });
       } catch (e) {
         console.error("voice join", e);
       }
@@ -576,7 +583,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
       socket.emit("voice:leave");
       cleanupAll();
     };
-  }, [socket, voiceChannelId, getLocalStream, cleanupAll]);
+  }, [socket, voiceChannelId, voiceGuildId, getLocalStream, cleanupAll]);
 
   const setMuted = useCallback((muted) => {
     const stream = localStreamRef.current;
