@@ -347,3 +347,9 @@ end;
 $$;
 
 grant execute on function public.accept_guild_invite (uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Icônes serveur (image data-URL courte ou thème logo). Idempotent sur bases existantes.
+-- ---------------------------------------------------------------------------
+alter table public.guilds add column if not exists icon_url text;
+alter table public.guilds add column if not exists icon_brand_key text;

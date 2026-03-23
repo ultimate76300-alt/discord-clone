@@ -392,10 +392,15 @@ export default function App() {
   }, []);
 
   const handleCreateGuildSubmit = useCallback(
-    async (name) => {
+    async (payload) => {
+      const name = typeof payload === "string" ? payload : payload?.name ?? "";
+      const iconOpts =
+        typeof payload === "string"
+          ? {}
+          : { iconUrl: payload?.iconUrl ?? null, iconBrandKey: payload?.iconBrandKey ?? null };
       setSelectedTextId("");
       setMessages([]);
-      const r = await createGuild(name);
+      const r = await createGuild(name, iconOpts);
       if (r?.ok && r.guildId) {
         setActiveGuildId(r.guildId);
         setCreateGuildOpen(false);

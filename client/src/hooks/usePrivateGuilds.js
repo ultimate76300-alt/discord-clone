@@ -1,5 +1,65 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { isValidBrandPresetKey } from "../lib/guildBrandPresets";
+
+function normalizeGuildId(v) {
+  if (v == null) return null;
+  if (typeof v === "string") return v;
+  return String(v);
+}
+
+function upsertGuildSorted(prev, entry) {
+  const others = prev.filter((x) => x.id !== entry.id);
+  const next = [...others, entry];
+  next.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return next;
+}
+
+function normalizeIconOpts(iconOpts) {
+  const rawUrl = iconOpts?.iconUrl;
+  const iconUrl =
+    typeof rawUrl === "string" && rawUrl.startsWith("data:image/") && rawUrl.length < 290_000
+      ? rawUrl.trim()
+      : null;
+  const iconBrandKey =
+    !iconUrl && iconOpts?.iconBrandKey && isValidBrandPresetKey(iconOpts.iconBrandKey)
+      ? iconOpts.iconBrandKey
+      : null;
+  return { iconUrl, iconBrandKey };
+}
+
+async function persistNewGuildIcons(gid, iconOpts) {
+  const { iconUrl, iconBrandKey } = normalizeIconOpts(iconOpts || {});
+  if (!iconUrl && !iconBrandKey) return { ok: true };
+  if (!supabase) return { ok: false, message: "Supabase indisponible" };
+
+  const patch = iconUrl
+    ? { icon_url: iconUrl, icon_brand_key: null }
+    : { icon_brand_key: iconBrandKey, icon_url: null };
+
+  const { error } = await supabase.from("guilds").update(patch).eq("id", gid);
+  if (error) {
+    const col = /column|schema|icon_/i.test(`${error.message || ""} ${error.details || ""}`);
+    return {
+      ok: false,
+      message: col
+        ? "Colonne icône absente : exécute supabase/guilds-icon-columns.sql dans Supabase, puis réessaie."
+        : error.message || "Sauvegarde de l’icône impossible",
+    };
+  }
+  return { ok: true };
+}
+
+function guildEntryFromRow(g, roleByGid) {
+  return {
+    id: g.id,
+    name: g.name || "Serveur",
+    ownerId: g.owner_id,
+    myRole: roleByGid.get(g.id) || "member",
+    iconUrl: g.icon_url || null,
+    iconBrandKey: g.icon_brand_key || null,
+  };
+}
 
 /** Tables guild_* absentes : exécuter supabase/private-guilds.sql dans le SQL Editor. */
 export const GUILD_SQL_SETUP_HINT =
@@ -31,9 +91,12 @@ export function usePrivateGuilds(enabled, userId) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [guildTablesMissing, setGuildTablesMissing] = useState(false);
+  /** Évite qu’un load() démarré avant la création d’un serveur écrase la liste après coup. */
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
     if (!enabled || !userId || !supabase) return;
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -44,27 +107,35 @@ export function usePrivateGuilds(enabled, userId) {
         .select("role, guild_id")
         .eq("user_id", userId);
       if (mErr) throw mErr;
+      if (seq !== loadSeq.current) return;
       setGuildTablesMissing(false);
 
       const guildIds = [...new Set((memberships || []).map((m) => m.guild_id).filter(Boolean))];
       let list = [];
       if (guildIds.length) {
-        const { data: guildRows, error: gErr } = await supabase
+        let guildRows;
+        let gErr;
+        const selFull = await supabase
           .from("guilds")
-          .select("id, name, owner_id")
+          .select("id, name, owner_id, icon_url, icon_brand_key")
           .in("id", guildIds);
+        guildRows = selFull.data;
+        gErr = selFull.error;
+        const msg = `${gErr?.message || ""} ${gErr?.details || ""}`.toLowerCase();
+        if (gErr && (msg.includes("icon_url") || msg.includes("icon_brand") || msg.includes("column"))) {
+          const fallback = await supabase.from("guilds").select("id, name, owner_id").in("id", guildIds);
+          guildRows = fallback.data;
+          gErr = fallback.error;
+        }
         if (gErr) throw gErr;
+        if (seq !== loadSeq.current) return;
         const roleByGid = new Map((memberships || []).map((m) => [m.guild_id, m.role]));
         list = (guildRows || [])
-          .map((g) => ({
-            id: g.id,
-            name: g.name || "Serveur",
-            ownerId: g.owner_id,
-            myRole: roleByGid.get(g.id) || "member",
-          }))
+          .map((g) => guildEntryFromRow(g, roleByGid))
           .filter((x) => x.id);
         list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
       }
+      if (seq !== loadSeq.current) return;
       setGuilds(list);
 
       const { data: invites, error: iErr } = await supabase
@@ -72,6 +143,8 @@ export function usePrivateGuilds(enabled, userId) {
         .select("id, guild_id, invited_by")
         .eq("invitee_id", userId)
         .eq("status", "pending");
+
+      if (seq !== loadSeq.current) return;
 
       if (iErr) {
         console.warn("guild_invites load", iErr.message);
@@ -101,6 +174,7 @@ export function usePrivateGuilds(enabled, userId) {
           }
         }
 
+        if (seq !== loadSeq.current) return;
         setIncomingInvites(
           (invites || []).map((i) => ({
             id: i.id,
@@ -111,6 +185,7 @@ export function usePrivateGuilds(enabled, userId) {
         );
       }
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       const missing = isGuildTablesMissingError(e);
       setGuildTablesMissing(missing);
       setError(missing ? GUILD_SQL_SETUP_HINT : e?.message || "Erreur serveurs privés");
@@ -119,7 +194,7 @@ export function usePrivateGuilds(enabled, userId) {
         setIncomingInvites([]);
       }
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [enabled, userId]);
 
@@ -128,16 +203,35 @@ export function usePrivateGuilds(enabled, userId) {
   }, [load]);
 
   const createGuild = useCallback(
-    async (name) => {
+    async (name, iconOpts) => {
       if (!supabase) return { ok: false, message: "Supabase indisponible" };
       if (!userId) return { ok: false, message: "Non connecté" };
-      const t = name.trim();
+      const t = (typeof name === "string" ? name : "").trim();
       if (t.length < 1 || t.length > 64) return { ok: false, message: "Nom invalide (1–64 car.)" };
+      const icons = normalizeIconOpts(iconOpts);
 
       const rpc = await supabase.rpc("create_guild_with_defaults", { p_name: t });
       if (!rpc.error) {
+        const gid = normalizeGuildId(rpc.data);
+        if (!gid) return { ok: false, message: "Réponse serveur invalide (id manquant)" };
+
+        const iconRes = await persistNewGuildIcons(gid, icons);
+        const optimistic = {
+          id: gid,
+          name: t,
+          ownerId: userId,
+          myRole: "owner",
+          iconUrl: icons.iconUrl,
+          iconBrandKey: icons.iconBrandKey,
+        };
+        setGuilds((prev) => upsertGuildSorted(prev, optimistic));
+
         await load();
-        return { ok: true, guildId: rpc.data };
+        return {
+          ok: true,
+          guildId: gid,
+          warn: iconRes.ok ? undefined : iconRes.message,
+        };
       }
 
       if (isGuildTablesMissingError(rpc.error)) {
@@ -181,8 +275,22 @@ export function usePrivateGuilds(enabled, userId) {
       ]);
       if (ch.error) return { ok: false, message: ch.error.message };
 
+      const gidStr = normalizeGuildId(gid);
+      if (!gidStr) return { ok: false, message: "Id serveur invalide" };
+
+      const iconRes = await persistNewGuildIcons(gidStr, icons);
+      setGuilds((prev) =>
+        upsertGuildSorted(prev, {
+          id: gidStr,
+          name: t,
+          ownerId: userId,
+          myRole: "owner",
+          iconUrl: icons.iconUrl,
+          iconBrandKey: icons.iconBrandKey,
+        })
+      );
       await load();
-      return { ok: true, guildId: gid };
+      return { ok: true, guildId: gidStr, warn: iconRes.ok ? undefined : iconRes.message };
     },
     [load, userId]
   );

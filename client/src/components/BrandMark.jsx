@@ -1,7 +1,13 @@
+import { GUILD_BRAND_PRESETS } from "../lib/guildBrandPresets";
+
 /**
  * Logo « atome » — noyau + orbites (même géométrie que /favicon.svg).
+ * @param {string} [variant] — clé parmi `GUILD_BRAND_PRESETS` (couleurs du thème).
  */
-export function BrandMark({ className = "h-9 w-9 shrink-0", title = "AtomVoice" }) {
+export function BrandMark({ className = "h-9 w-9 shrink-0", title = "AtomVoice", variant }) {
+  const p =
+    variant && GUILD_BRAND_PRESETS[variant] ? GUILD_BRAND_PRESETS[variant] : GUILD_BRAND_PRESETS.site;
+
   return (
     <svg
       className={className}
@@ -12,13 +18,13 @@ export function BrandMark({ className = "h-9 w-9 shrink-0", title = "AtomVoice" 
       aria-label={title}
     >
       <title>{title}</title>
-      <circle cx="20" cy="20" r="4" className="fill-discord-accent" />
+      <circle cx="20" cy="20" r="4" className={p.core} />
       <ellipse
         cx="20"
         cy="20"
         rx="15.5"
         ry="6.5"
-        className="stroke-discord-accent"
+        className={p.o1}
         strokeWidth="1.5"
         opacity="0.92"
         transform="rotate(0 20 20)"
@@ -28,7 +34,7 @@ export function BrandMark({ className = "h-9 w-9 shrink-0", title = "AtomVoice" 
         cy="20"
         rx="15.5"
         ry="6.5"
-        className="stroke-[#53b4ff]"
+        className={p.o2}
         strokeWidth="1.35"
         opacity="0.58"
         transform="rotate(58 20 20)"
@@ -38,7 +44,7 @@ export function BrandMark({ className = "h-9 w-9 shrink-0", title = "AtomVoice" 
         cy="20"
         rx="15.5"
         ry="6.5"
-        className="stroke-discord-green"
+        className={p.o3}
         strokeWidth="1.2"
         opacity="0.48"
         transform="rotate(118 20 20)"

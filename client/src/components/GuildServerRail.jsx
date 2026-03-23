@@ -1,3 +1,6 @@
+import { BrandMark } from "./BrandMark";
+import { isValidBrandPresetKey } from "../lib/guildBrandPresets";
+
 function initialForName(name) {
   const t = (name || "").trim();
   if (!t) return "?";
@@ -14,7 +17,7 @@ export function GuildServerRail({
   onOpenCreateGuild,
 }) {
   const railBtn =
-    "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-discord-accent";
+    "relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-discord-accent";
 
   return (
     <aside
@@ -47,11 +50,17 @@ export function GuildServerRail({
               onClick={() => onSelectPrivateGuild?.(g.id)}
               className={`${railBtn} text-sm font-semibold ${
                 active
-                  ? "rounded-2xl bg-discord-accent text-white"
+                  ? "rounded-2xl bg-discord-accent text-white ring-0"
                   : "bg-discord-sidebar text-discord-text hover:rounded-xl hover:bg-discord-accent hover:text-white"
               }`}
             >
-              {initialForName(g.name)}
+              {g.iconUrl ? (
+                <img src={g.iconUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              ) : g.iconBrandKey && isValidBrandPresetKey(g.iconBrandKey) ? (
+                <BrandMark variant={g.iconBrandKey} className="h-8 w-8" title={g.name} />
+              ) : (
+                <span className="relative z-[1]">{initialForName(g.name)}</span>
+              )}
             </button>
           );
         })}
