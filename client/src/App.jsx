@@ -12,9 +12,23 @@ import { useVoiceConnection } from "./hooks/useVoiceConnection";
 const DEFAULT_TEXT = ["general", "random", "dev", "off-topic"];
 const DEFAULT_VOICE = ["Lobby", "Gaming", "Study"];
 
+/** Production must not use a localhost URL baked at build time (common Railway misconfig). */
+function socketBaseUrl() {
+  const raw = (import.meta.env.VITE_SOCKET_URL || "").trim();
+  if (import.meta.env.DEV) {
+    return raw || "http://localhost:3001";
+  }
+  const isLocal = /^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?\/?$/i.test(raw);
+  if (raw && !isLocal) {
+    return raw.replace(/\/$/, "");
+  }
+  return window.location.origin;
+}
+
 export default function App() {
   const [identity, setIdentity] = useState(() => loadIdentity());
   const [connected, setConnected] = useState(false);
+  const [socketError, setSocketError] = useState(null);
   const [textChannels, setTextChannels] = useState(DEFAULT_TEXT);
   const [voiceChannels, setVoiceChannels] = useState(DEFAULT_VOICE);
   const [selectedTextId, setSelectedTextId] = useState("general");
@@ -26,14 +40,14 @@ export default function App() {
   const [cameraOn, setCameraOn] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
 
-  const socketUrl =
-    import.meta.env.VITE_SOCKET_URL ||
-    (import.meta.env.DEV ? "http://localhost:3001" : window.location.origin);
+  const socketUrl = useMemo(() => socketBaseUrl(), []);
   const socket = useMemo(
     () =>
       io(socketUrl, {
         autoConnect: false,
         transports: ["websocket", "polling"],
+        reconnectionAttempts: 8,
+        reconnectionDelay: 1000,
       }),
     [socketUrl]
   );
@@ -53,6 +67,7 @@ export default function App() {
 
   useEffect(() => {
     const onConnect = () => {
+      setSocketError(null);
       setConnected(true);
       const id = loadIdentity();
       if (id) {
@@ -69,15 +84,25 @@ export default function App() {
       if (res?.voice?.length) setVoiceChannels(res.voice);
     };
     const onDisconnect = () => setConnected(false);
+    const onConnectError = (err) => {
+      setSocketError(err?.message || "Connection failed");
+    };
+    const onReconnectFailed = () => {
+      setSocketError((prev) => prev || "Trop de tentatives, connexion abandonnée.");
+    };
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
+    socket.on("reconnect_failed", onReconnectFailed);
     socket.on("channels:config", onChannelsConfig);
     socket.connect();
 
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
+      socket.off("reconnect_failed", onReconnectFailed);
       socket.off("channels:config", onChannelsConfig);
       socket.disconnect();
     };
@@ -195,6 +220,7 @@ export default function App() {
               channelId={selectedTextId}
               messages={messages}
               connected={connected}
+              connectionError={socketError}
               onSend={sendChat}
             />
           )}

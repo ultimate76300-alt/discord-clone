@@ -1,7 +1,13 @@
 import { useEffect, useRef } from "react";
 import { formatMessageTime } from "../lib/time";
 
-export function ChatView({ channelId, messages, connected, onSend }) {
+export function ChatView({
+  channelId,
+  messages,
+  connected,
+  connectionError,
+  onSend,
+}) {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -27,7 +33,19 @@ export function ChatView({ channelId, messages, connected, onSend }) {
       </header>
 
       <div className="scroll-discord flex-1 overflow-y-auto px-4 py-4">
-        {!connected && (
+        {!connected && connectionError && (
+          <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            <p className="font-medium">Impossible de joindre le serveur</p>
+            <p className="mt-1 text-red-200/80">{connectionError}</p>
+            <p className="mt-2 text-xs text-discord-muted">
+              Sur Railway : ne mets pas{" "}
+              <code className="rounded bg-black/30 px-1">VITE_SOCKET_URL=http://localhost…</code>{" "}
+              dans les variables de <strong>build</strong>. Laisse-la vide pour utiliser la même
+              URL que le site.
+            </p>
+          </div>
+        )}
+        {!connected && !connectionError && (
           <p className="text-sm text-discord-muted">Connecting to chat…</p>
         )}
         <ul className="space-y-4">
