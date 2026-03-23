@@ -1,7 +1,7 @@
 -- =====================================================================
--- OBLIGATOIRE pour les serveurs privés : copier TOUT ce fichier dans
--- Supabase → SQL Editor → Run (une fois), APRÈS supabase/friends-dm.sql.
--- Sans ça, l’erreur « Could not find the table public.guilds » est normale.
+-- Serveurs privés : copier TOUT ce fichier dans Supabase → SQL Editor → Run.
+-- Ne dépend PAS de public.profiles : guild_messages référence auth.users.
+-- Pour amis + MP + photo profil, exécute aussi supabase/friends-dm.sql (crée profiles).
 -- =====================================================================
 --
 -- Création de serveur, salons texte/vocal, invitations entre amis, admins, exclusions.
@@ -57,7 +57,7 @@ create index if not exists guild_invites_invitee_pending
 create table if not exists public.guild_messages (
   id uuid primary key default gen_random_uuid(),
   channel_id uuid not null references public.guild_channels (id) on delete cascade,
-  sender_id uuid not null references public.profiles (id) on delete cascade,
+  sender_id uuid not null references auth.users (id) on delete cascade,
   body text not null check (char_length(body) >= 1 and char_length(body) <= 2000),
   created_at timestamptz not null default now()
 );
