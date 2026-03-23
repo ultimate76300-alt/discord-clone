@@ -3,6 +3,14 @@ import { supabase } from "../lib/supabase";
 import { AVATAR_COLORS, AVATAR_EMOJIS } from "../lib/identity";
 import { randomAvatarMeta } from "../lib/authProfile";
 
+function friendlyAuthError(raw) {
+  const m = String(raw || "").toLowerCase();
+  if (m.includes("rate limit") || m.includes("too many")) {
+    return "Limite d’e-mails atteinte sur le projet (Supabase). Réessaie dans environ une heure, ou configure un SMTP personnalisé / ajuste les limites dans le tableau Supabase.";
+  }
+  return raw || "Erreur inconnue.";
+}
+
 export function AuthModal() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -24,7 +32,7 @@ export function AuthModal() {
         email: email.trim(),
         password,
       });
-      if (err) setError(err.message || "Connexion impossible.");
+      if (err) setError(friendlyAuthError(err.message) || "Connexion impossible.");
     } catch (e) {
       setError(e?.message || "Erreur réseau pendant la connexion.");
     } finally {
@@ -56,7 +64,7 @@ export function AuthModal() {
         },
       });
       if (err) {
-        setError(err.message);
+        setError(friendlyAuthError(err.message));
         return;
       }
       if (data.user && !data.session) {
