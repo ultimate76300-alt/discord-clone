@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BrandMark } from "./BrandMark";
 import { GuildServerManageMenu } from "./GuildServerManageMenu";
+import { AvatarBubble } from "./AvatarBubble";
 
 function ChannelIcon({ hash }) {
   return (
@@ -21,6 +22,7 @@ export function Sidebar({
   onDisconnectVoice,
   friendsEnabled = false,
   friends = [],
+  onlineFriendIds = new Set(),
   incoming = [],
   outgoing = [],
   selectedDmPeerId = null,
@@ -47,6 +49,8 @@ export function Sidebar({
   guildsLoadError = null,
 }) {
   const [friendInput, setFriendInput] = useState("");
+  const showLobbyFriendList = Boolean(friendsEnabled && !activeGuildId);
+  const showChannelSections = !showLobbyFriendList;
 
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-discord-sidebar md:w-64">
@@ -229,28 +233,52 @@ export function Sidebar({
             </div>
 
             <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
-              Conversations
+              {showLobbyFriendList ? "Liste d'amis" : "Conversations"}
             </div>
-            <ul className="mb-4 space-y-0.5">
+            <ul className="mb-4 space-y-1">
               {friends.length === 0 ? (
                 <li className="px-2 py-2 text-xs text-discord-muted">Aucun ami pour l’instant</li>
               ) : (
                 friends.map((f) => (
                   <li key={f.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectDmPeer?.(f.id)}
-                      className={`flex w-full items-center rounded px-2 py-1.5 text-left text-sm transition ${
+                    <div
+                      className={`flex items-center rounded px-2 py-1.5 transition ${
                         mainPane === "dm" && selectedDmPeerId === f.id
                           ? "bg-discord-hover text-discord-text"
                           : "text-discord-muted hover:bg-discord-hover/80 hover:text-discord-text"
                       }`}
                     >
-                      <span className="mr-2 text-base" aria-hidden>
-                        @
-                      </span>
-                      <span className="truncate">{f.displayName}</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectDmPeer?.(f.id)}
+                        className="mr-2 shrink-0"
+                        title={`Ouvrir la conversation avec ${f.displayName}`}
+                      >
+                        <AvatarBubble
+                          avatarUrl={f.avatarUrl}
+                          avatarColor={f.avatarColor || "#5865f2"}
+                          avatarEmoji="👤"
+                          className="h-8 w-8"
+                          textClassName="text-sm"
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectDmPeer?.(f.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="truncate text-sm font-medium text-discord-text">{f.displayName}</div>
+                        <div className="text-[11px] text-discord-muted">
+                          {onlineFriendIds?.has?.(f.id) ? "En ligne" : "Hors ligne"}
+                        </div>
+                      </button>
+                      <span
+                        className={`ml-2 h-2.5 w-2.5 shrink-0 rounded-full ${
+                          onlineFriendIds?.has?.(f.id) ? "bg-discord-green" : "bg-discord-muted/50"
+                        }`}
+                        aria-hidden
+                      />
+                    </div>
                   </li>
                 ))
               )}
@@ -258,10 +286,12 @@ export function Sidebar({
           </>
         ) : null}
 
-        <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
-          Text channels
-        </div>
-        <ul className="space-y-0.5">
+        {showChannelSections ? (
+          <>
+            <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
+              Text channels
+            </div>
+            <ul className="space-y-0.5">
           {friendsEnabled && activeGuildId && textChannels.length === 0 ? (
             <li className="px-2 py-2 text-[11px] leading-snug text-discord-muted">
               Aucun salon texte. Utilise <span className="text-discord-text">Gestion du serveur</span> pour en
@@ -288,12 +318,12 @@ export function Sidebar({
               </li>
             );
           })}
-        </ul>
+            </ul>
 
-        <div className="mb-1 mt-4 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
-          Voice channels
-        </div>
-        <ul className="space-y-0.5">
+            <div className="mb-1 mt-4 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
+              Voice channels
+            </div>
+            <ul className="space-y-0.5">
           {friendsEnabled && activeGuildId && voiceChannels.length === 0 ? (
             <li className="px-2 py-2 text-[11px] leading-snug text-discord-muted">
               Aucun salon vocal. Ajoute-en un via <span className="text-discord-text">Gestion du serveur</span>.
@@ -324,7 +354,9 @@ export function Sidebar({
               </li>
             );
           })}
-        </ul>
+            </ul>
+          </>
+        ) : null}
       </nav>
 
       {connectedVoiceId && (

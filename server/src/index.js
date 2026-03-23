@@ -145,6 +145,8 @@ const VOICE_CHANNELS = ["Lobby", "Gaming", "Study"];
 
 const PUBLIC_TEXT_SET = new Set(TEXT_CHANNELS);
 const PUBLIC_VOICE_SET = new Set(VOICE_CHANNELS);
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function unwrapSocketArg(raw) {
   if (Array.isArray(raw) && raw.length > 0) return unwrapSocketArg(raw[0]);
@@ -267,6 +269,33 @@ async function verifyGuildMember(guildId, userId) {
     .maybeSingle();
   if (error || !data) return null;
   return data.role;
+}
+
+function parsePrivateDmVoiceId(channelId) {
+  const raw = String(channelId || "").trim();
+  const m = /^dm:([^:]+):([^:]+)$/i.exec(raw);
+  if (!m) return null;
+  const a = String(m[1] || "").trim();
+  const b = String(m[2] || "").trim();
+  if (!UUID_RE.test(a) || !UUID_RE.test(b)) return null;
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  if (x === y) return null;
+  return { a: x, b: y, canonical: x < y ? `dm:${x}:${y}` : `dm:${y}:${x}` };
+}
+
+async function verifyFriendRelation(userA, userB) {
+  if (!supabaseServer || !userA || !userB) return false;
+  const { data, error } = await supabaseServer
+    .from("friend_requests")
+    .select("id")
+    .eq("status", "accepted")
+    .or(
+      `and(sender_id.eq.${userA},receiver_id.eq.${userB}),and(sender_id.eq.${userB},receiver_id.eq.${userA})`
+    )
+    .limit(1);
+  if (error) return false;
+  return Boolean(data && data.length > 0);
 }
 
 function getVoicePeers(channelId, excludeSocketId, guildId) {
@@ -614,9 +643,10 @@ io.on("connection", (socket) => {
       const { channelId } = parseChannelJoinPayload(rawPayload);
       if (!channelId) return;
       const guildId = guildIdBySocket.get(socket.id) ?? null;
+      const dmVoice = !guildId ? parsePrivateDmVoiceId(channelId) : null;
 
       if (guildId && PUBLIC_VOICE_SET.has(channelId)) return;
-      if (!guildId && !PUBLIC_VOICE_SET.has(channelId)) return;
+      if (!guildId && !PUBLIC_VOICE_SET.has(channelId) && !dmVoice) return;
 
       try {
         if (guildId) {
@@ -627,6 +657,13 @@ io.on("connection", (socket) => {
           if (!membership) return;
           const meta = await loadGuildChannelMeta(guildId);
           if (!meta || !meta.voiceIds.has(channelId)) return;
+        } else if (dmVoice) {
+          const uid = String(socket.data.supabaseUserId || "").toLowerCase();
+          if (!uid) return;
+          if (uid !== dmVoice.a && uid !== dmVoice.b) return;
+          const peerId = uid === dmVoice.a ? dmVoice.b : dmVoice.a;
+          const ok = await verifyFriendRelation(uid, peerId);
+          if (!ok) return;
         }
 
         const prev = voiceChannelBySocket.get(socket.id);
@@ -636,19 +673,20 @@ io.on("connection", (socket) => {
           socket.to(voiceRoom(prevG, prev)).emit("voice:peer-left", { socketId: socket.id });
         }
 
-        voiceChannelBySocket.set(socket.id, channelId);
-        socket.join(voiceRoom(guildId, channelId));
+        const effectiveChannelId = dmVoice ? dmVoice.canonical : channelId;
+        voiceChannelBySocket.set(socket.id, effectiveChannelId);
+        socket.join(voiceRoom(guildId, effectiveChannelId));
         const profile = identities.get(socket.id);
         if (!profile) return;
 
-        const existing = getVoicePeers(channelId, socket.id, guildId);
+        const existing = getVoicePeers(effectiveChannelId, socket.id, guildId);
         socket.emit("voice:peers", {
-          channelId,
+          channelId: effectiveChannelId,
           peers: existing,
         });
 
-        socket.to(voiceRoom(guildId, channelId)).emit("voice:peer-joined", {
-          channelId,
+        socket.to(voiceRoom(guildId, effectiveChannelId)).emit("voice:peer-joined", {
+          channelId: effectiveChannelId,
           peer: { socketId: socket.id, ...profile },
         });
       } catch (e) {

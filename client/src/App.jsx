@@ -65,6 +65,13 @@ function socketBaseUrl() {
   return window.location.origin;
 }
 
+function buildDmVoiceChannelId(a, b) {
+  const x = String(a || "").trim().toLowerCase();
+  const y = String(b || "").trim().toLowerCase();
+  if (!x || !y) return "";
+  return x < y ? `dm:${x}:${y}` : `dm:${y}:${x}`;
+}
+
 export default function App() {
   const useSupabaseAuth = isSupabaseConfigured;
   const [guestIdentity, setGuestIdentity] = useState(() => loadIdentity());
@@ -101,6 +108,7 @@ export default function App() {
   const [peerMix, setPeerMix] = useState(() => new Map());
   const [selectedDmPeerId, setSelectedDmPeerId] = useState(null);
   const [friendAddError, setFriendAddError] = useState(null);
+  const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
 
   useEffect(() => {
     if (!useSupabaseAuth || !supabase) return;
@@ -273,6 +281,19 @@ export default function App() {
     [socketUrl, useSupabaseAuth, accessToken]
   );
 
+  useEffect(() => {
+    const onPresence = (payload) => {
+      const users = Array.isArray(payload?.users) ? payload.users : [];
+      const next = new Set();
+      for (const u of users) {
+        if (u?.clientId && typeof u.clientId === "string") next.add(u.clientId);
+      }
+      setOnlineUserIds(next);
+    };
+    socket.on("presence:update", onPresence);
+    return () => socket.off("presence:update", onPresence);
+  }, [socket]);
+
   const { messages, sendChat, setMessages } = useServerTextChat({
     socket,
     activeGuildId,
@@ -433,6 +454,19 @@ export default function App() {
     setSelectedDmPeerId(peerId);
     setMainPane("dm");
   }, []);
+
+  const handleStartDmCall = useCallback(
+    (peerId) => {
+      if (!myUserId || !peerId) return;
+      const dmVoiceId = buildDmVoiceChannelId(myUserId, peerId);
+      if (!dmVoiceId) return;
+      setConnectedVoiceId(dmVoiceId);
+      setMainPane("voice");
+      setCameraOn(false);
+      setScreenOn(false);
+    },
+    [myUserId]
+  );
 
   const handleDisconnectVoice = useCallback(() => {
     // On joue aussi le son pour la personne qui quitte (elle ne reçoit pas l'event socket).
@@ -606,9 +640,13 @@ export default function App() {
 
   const selectedVoiceLabel = useMemo(() => {
     if (!connectedVoiceId) return "";
+    if (connectedVoiceId.startsWith("dm:")) {
+      if (selectedDmPeer?.displayName) return `Appel privé · ${selectedDmPeer.displayName}`;
+      return "Appel privé";
+    }
     const c = voiceChannels.find((x) => x.id === connectedVoiceId);
     return c?.name ?? connectedVoiceId;
-  }, [voiceChannels, connectedVoiceId]);
+  }, [voiceChannels, connectedVoiceId, selectedDmPeer]);
 
   const serverSubtitle = useMemo(() => {
     if (!activeGuildId) return "Lobby public";
@@ -777,6 +815,7 @@ export default function App() {
           onDisconnectVoice={handleDisconnectVoice}
           friendsEnabled={useSupabaseAuth}
           friends={friends}
+          onlineFriendIds={onlineUserIds}
           incoming={incoming}
           outgoing={outgoing}
           selectedDmPeerId={selectedDmPeerId}
@@ -857,6 +896,8 @@ export default function App() {
                 error={dmError}
                 ready={dmReady}
                 headerTrailing={connectedUsersTab}
+                peerOnline={onlineUserIds.has(selectedDmPeerId)}
+                onStartCall={() => handleStartDmCall(selectedDmPeerId)}
                 onSend={async (text) => {
                   await sendDmMessage(text);
                 }}

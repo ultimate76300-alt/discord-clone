@@ -17,6 +17,8 @@ export function DmChatView({
   ready,
   onSend,
   headerTrailing,
+  onStartCall,
+  peerOnline = false,
 }) {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -49,8 +51,19 @@ export function DmChatView({
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <h2 className="min-w-0 truncate text-sm font-bold text-discord-text">{peerDisplayName}</h2>
-          <span className="shrink-0 text-xs text-discord-muted">Message privé</span>
+          <span className="shrink-0 text-xs text-discord-muted">
+            {peerOnline ? "En ligne" : "Hors ligne"}
+          </span>
         </div>
+        {onStartCall ? (
+          <button
+            type="button"
+            onClick={onStartCall}
+            className="shrink-0 rounded bg-discord-accent px-2.5 py-1 text-xs font-semibold text-white hover:bg-discord-accent/90"
+          >
+            Appeler
+          </button>
+        ) : null}
         {headerTrailing ? <div className="shrink-0">{headerTrailing}</div> : null}
       </header>
 

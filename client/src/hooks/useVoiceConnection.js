@@ -13,6 +13,10 @@ import {
 
 const PUBLIC_LOBBY_VOICE_IDS = new Set(["Lobby", "Gaming", "Study"]);
 
+function isPrivateDmVoiceId(channelId) {
+  return typeof channelId === "string" && channelId.startsWith("dm:");
+}
+
 function tuneVideoTrackContentHint(track) {
   if (!track || track.kind !== "video") return;
   try {
@@ -568,7 +572,11 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           avatarUrl: profileRef.current.avatarUrl ?? "",
         });
         if (voiceGuildId && PUBLIC_LOBBY_VOICE_IDS.has(voiceChannelId)) return;
-        if (!voiceGuildId && !PUBLIC_LOBBY_VOICE_IDS.has(voiceChannelId)) return;
+        if (!voiceGuildId) {
+          const isLobbyVoice = PUBLIC_LOBBY_VOICE_IDS.has(voiceChannelId);
+          const isDmVoice = isPrivateDmVoiceId(voiceChannelId);
+          if (!isLobbyVoice && !isDmVoice) return;
+        }
         socket.emit("voice:join", {
           channelId: voiceChannelId,
           guildId: voiceGuildId ?? null,
