@@ -1,7 +1,9 @@
 -- =====================================================================
 -- Serveurs privés : copier TOUT ce fichier dans Supabase → SQL Editor → Run.
--- Ne dépend PAS de public.profiles : guild_messages référence auth.users.
--- Pour amis + MP + photo profil, exécute aussi supabase/friends-dm.sql (crée profiles).
+-- Ne dépend pas de public.profiles ni de friend_requests (amis/MP = fichier séparé).
+-- Pour amis + MP + profils : supabase/friends-dm.sql
+-- Pour RLS « invitation = amis acceptés uniquement » : après friends-dm, exécute
+-- supabase/private-guilds-invites-friends-only.sql
 -- =====================================================================
 --
 -- Création de serveur, salons texte/vocal, invitations entre amis, admins, exclusions.
@@ -222,7 +224,12 @@ using (
   )
 );
 
-create policy "gi_insert_admin_friend"
+-- Invitations par owner/admin (ne référence pas friend_requests).
+-- L’UI n’invite que des amis ; pour imposer ça en RLS, exécute après friends-dm.sql :
+-- supabase/private-guilds-invites-friends-only.sql
+drop policy if exists "gi_insert_admin_friend" on public.guild_invites;
+drop policy if exists "gi_insert_admin" on public.guild_invites;
+create policy "gi_insert_admin"
 on public.guild_invites for insert
 to authenticated
 with check (
@@ -230,14 +237,6 @@ with check (
   and exists (
     select 1 from public.guild_members m
     where m.guild_id = guild_invites.guild_id and m.user_id = auth.uid() and m.role in ('owner', 'admin')
-  )
-  and exists (
-    select 1 from public.friend_requests fr
-    where fr.status = 'accepted'
-      and (
-        (fr.from_id = auth.uid() and fr.to_id = invitee_id)
-        or (fr.from_id = invitee_id and fr.to_id = auth.uid())
-      )
   )
 );
 
