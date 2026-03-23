@@ -32,21 +32,6 @@ export function useServerTextChat({ socket, activeGuildId, selectedTextId }) {
       const t = targetRef.current;
       if (!t || !eventMatchesChatTarget(t, pkt)) return;
       const list = pkt.messages;
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "site-empty-slow",
-          hypothesisId: "H4",
-          location: "client/src/hooks/useServerTextChat.js:onHistory",
-          message: "Text history received",
-          data: { scope: pkt?.scope || null, guildId: pkt?.guildId || null, count: Array.isArray(list) ? list.length : -1 },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setMessages(Array.isArray(list) ? list : []);
     };
 

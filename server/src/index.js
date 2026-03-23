@@ -7,6 +7,7 @@ import http from "http";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import { Server } from "socket.io";
+import { registerApiRoutes } from "./routes/api.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, "../../client/dist");
@@ -99,6 +100,8 @@ const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
 const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 const supabaseServer =
   supabaseUrl && supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
+
+registerApiRoutes(app, { supabaseServer });
 
 if (supabaseServer) {
   io.use(async (socket, next) => {
@@ -291,7 +294,7 @@ async function verifyFriendRelation(userA, userB) {
     .select("id")
     .eq("status", "accepted")
     .or(
-      `and(sender_id.eq.${userA},receiver_id.eq.${userB}),and(sender_id.eq.${userB},receiver_id.eq.${userA})`
+      `and(from_id.eq.${userA},to_id.eq.${userB}),and(from_id.eq.${userB},to_id.eq.${userA})`
     )
     .limit(1);
   if (error) return false;

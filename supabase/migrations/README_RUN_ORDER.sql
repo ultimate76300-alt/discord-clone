@@ -1,0 +1,8 @@
+-- RUN ORDER (copy/paste sequentially in SQL editor):
+-- 1) ../friends-dm.sql
+-- 2) ../profiles-unique-handle.sql
+-- 3) ../private-guilds.sql
+-- 4) ../private-guilds-invites-friends-only.sql
+-- 5) 001_performance_core.sql
+-- 6) 002_read_models.sql
+-- 7) select pg_notify('pgrst', 'reload schema');

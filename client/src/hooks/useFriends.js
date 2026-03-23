@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { apiGet, apiPost } from "../lib/backendApi";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -28,27 +29,22 @@ export function useFriends(enabled, myUserId) {
     setLoading(true);
     setError(null);
     try {
+      try {
+        const body = await apiGet("/api/friends");
+        setFriends(Array.isArray(body?.friends) ? body.friends : []);
+        setIncoming(Array.isArray(body?.incoming) ? body.incoming : []);
+        setOutgoing(Array.isArray(body?.outgoing) ? body.outgoing : []);
+        setLoading(false);
+        return;
+      } catch {
+        // fallback Supabase direct if API unavailable
+      }
       const { data: rows, error: qErr } = await supabase
         .from("friend_requests")
         .select("id, from_id, to_id, status")
         .or(`from_id.eq.${myUserId},to_id.eq.${myUserId}`);
 
       if (qErr) throw qErr;
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "friends-invite-lag",
-          hypothesisId: "H1",
-          location: "client/src/hooks/useFriends.js:load",
-          message: "Friend requests loaded",
-          data: { myUserId, totalRows: (rows || []).length },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
 
       const accepted = (rows || []).filter((r) => r.status === "accepted");
       const pendingIn = (rows || []).filter(
@@ -99,21 +95,6 @@ export function useFriends(enabled, myUserId) {
         }))
       );
     } catch (e) {
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "friends-invite-lag",
-          hypothesisId: "H1",
-          location: "client/src/hooks/useFriends.js:load:catch",
-          message: "Friend requests load failed",
-          data: { myUserId, message: e?.message || "unknown", code: e?.code || null },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(e?.message || "Impossible de charger les amis");
       setFriends([]);
       setIncoming([]);
@@ -226,26 +207,17 @@ export function useFriends(enabled, myUserId) {
   const acceptRequest = useCallback(
     async (requestId) => {
       if (!supabase) return;
-      const { error: uErr } = await supabase
-        .from("friend_requests")
-        .update({ status: "accepted" })
-        .eq("id", requestId)
-        .eq("to_id", myUserId);
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "friends-invite-lag",
-          hypothesisId: "H2",
-          location: "client/src/hooks/useFriends.js:acceptRequest",
-          message: "Accept friend request attempted",
-          data: { requestId, myUserId, hasError: Boolean(uErr), error: uErr?.message || null },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      let uErr = null;
+      try {
+        await apiPost(`/api/friends/${requestId}/accept`);
+      } catch (e) {
+        const { error } = await supabase
+          .from("friend_requests")
+          .update({ status: "accepted" })
+          .eq("id", requestId)
+          .eq("to_id", myUserId);
+        uErr = error || e;
+      }
       if (uErr) throw uErr;
       await load();
     },
@@ -255,12 +227,18 @@ export function useFriends(enabled, myUserId) {
   const declineRequest = useCallback(
     async (requestId) => {
       if (!supabase) return;
-      const { error: dErr } = await supabase
-        .from("friend_requests")
-        .delete()
-        .eq("id", requestId)
-        .eq("to_id", myUserId)
-        .eq("status", "pending");
+      let dErr = null;
+      try {
+        await apiPost(`/api/friends/${requestId}/decline`);
+      } catch (e) {
+        const { error } = await supabase
+          .from("friend_requests")
+          .delete()
+          .eq("id", requestId)
+          .eq("to_id", myUserId)
+          .eq("status", "pending");
+        dErr = error || e;
+      }
       if (dErr) throw dErr;
       await load();
     },

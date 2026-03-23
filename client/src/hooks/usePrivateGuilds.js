@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { isValidBrandPresetKey } from "../lib/guildBrandPresets";
+import { apiGet, apiPost } from "../lib/backendApi";
 
 function normalizeGuildId(v) {
   if (v == null) return null;
@@ -118,6 +119,17 @@ export function usePrivateGuilds(enabled, userId) {
     setLoading(true);
     setError(null);
     try {
+      try {
+        const body = await apiGet("/api/guilds");
+        if (seq !== loadSeq.current) return;
+        setGuilds(Array.isArray(body?.guilds) ? body.guilds : []);
+        setIncomingInvites(Array.isArray(body?.incomingInvites) ? body.incomingInvites : []);
+        setGuildTablesMissing(false);
+        setLoading(false);
+        return;
+      } catch {
+        // fallback to Supabase direct flow
+      }
       // S’assure que le JWT est bien chargé avant les requêtes RLS (sinon 0 ligne sans erreur au F5 / en prod).
       await supabase.auth.getSession();
 
@@ -242,21 +254,6 @@ export function usePrivateGuilds(enabled, userId) {
         );
       }
     } catch (e) {
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "site-empty-slow",
-          hypothesisId: "H3",
-          location: "client/src/hooks/usePrivateGuilds.js:load:catch",
-          message: "Private guild load failed",
-          data: { userId, message: e?.message || "unknown", code: e?.code || null },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (seq !== loadSeq.current) return;
       const missing = isGuildTablesMissingError(e);
       setGuildTablesMissing(missing);
@@ -371,35 +368,19 @@ export function usePrivateGuilds(enabled, userId) {
   const sendGuildInvite = useCallback(
     async (guildId, inviteeUserId) => {
       if (!supabase || !userId) return { ok: false, message: "Non connecté" };
+      try {
+        await apiPost("/api/guilds/invite", { guildId, inviteeUserId });
+        return { ok: true };
+      } catch (e) {
+        // fallback below
+      }
       const { error: e } = await supabase.from("guild_invites").insert({
         guild_id: guildId,
         invited_by: userId,
         invitee_id: inviteeUserId,
         status: "pending",
       });
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "friends-invite-lag",
-          hypothesisId: "H3",
-          location: "client/src/hooks/usePrivateGuilds.js:sendGuildInvite",
-          message: "Guild invite insert attempted",
-          data: {
-            guildId,
-            invitedBy: userId,
-            inviteeUserId,
-            hasError: Boolean(e),
-            error: e?.message || null,
-            code: e?.code || null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      if (e) return { ok: false, message: e.message };
+      if (e) return { ok: false, message: e?.message || String(e) };
       return { ok: true };
     },
     [userId]
@@ -408,23 +389,14 @@ export function usePrivateGuilds(enabled, userId) {
   const acceptGuildInvite = useCallback(
     async (inviteId) => {
       if (!supabase) return { ok: false, message: "Supabase indisponible" };
-      const { error: e } = await supabase.rpc("accept_guild_invite", { p_invite_id: inviteId });
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "friends-invite-lag",
-          hypothesisId: "H4",
-          location: "client/src/hooks/usePrivateGuilds.js:acceptGuildInvite",
-          message: "Accept guild invite RPC attempted",
-          data: { inviteId, hasError: Boolean(e), error: e?.message || null, code: e?.code || null },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-      if (e) return { ok: false, message: e.message };
+      let e = null;
+      try {
+        await apiPost(`/api/guilds/invites/${inviteId}/accept`);
+      } catch (err) {
+        const rpc = await supabase.rpc("accept_guild_invite", { p_invite_id: inviteId });
+        e = rpc.error || err;
+      }
+      if (e) return { ok: false, message: e?.message || String(e) };
       await load();
       return { ok: true };
     },
