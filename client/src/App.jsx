@@ -65,13 +65,6 @@ function socketBaseUrl() {
   return window.location.origin;
 }
 
-function buildDmVoiceChannelId(a, b) {
-  const x = String(a || "").trim().toLowerCase();
-  const y = String(b || "").trim().toLowerCase();
-  if (!x || !y) return "";
-  return x < y ? `dm:${x}:${y}` : `dm:${y}:${x}`;
-}
-
 export default function App() {
   const useSupabaseAuth = isSupabaseConfigured;
   const [guestIdentity, setGuestIdentity] = useState(() => loadIdentity());
@@ -460,19 +453,6 @@ export default function App() {
     setSelectedDmPeerId(peerId);
     setMainPane("dm");
   }, []);
-
-  const handleStartDmCall = useCallback(
-    (peerId) => {
-      if (!myUserId || !peerId) return;
-      const dmVoiceId = buildDmVoiceChannelId(myUserId, peerId);
-      if (!dmVoiceId) return;
-      setConnectedVoiceId(dmVoiceId);
-      setMainPane("voice");
-      setCameraOn(false);
-      setScreenOn(false);
-    },
-    [myUserId]
-  );
 
   const handleDisconnectVoice = useCallback(() => {
     // On joue aussi le son pour la personne qui quitte (elle ne reçoit pas l'event socket).
@@ -903,7 +883,6 @@ export default function App() {
                 ready={dmReady}
                 headerTrailing={connectedUsersTab}
                 peerOnline={onlineUserIds.has(selectedDmPeerId)}
-                onStartCall={() => handleStartDmCall(selectedDmPeerId)}
                 onSend={async (text) => {
                   await sendDmMessage(text);
                 }}
