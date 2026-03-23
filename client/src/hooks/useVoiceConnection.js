@@ -437,6 +437,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
             displayName: p.displayName,
             avatarColor: p.avatarColor,
             avatarEmoji: p.avatarEmoji,
+            avatarUrl: p.avatarUrl,
           });
           return next;
         });
@@ -455,6 +456,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           displayName: peer.displayName,
           avatarColor: peer.avatarColor,
           avatarEmoji: peer.avatarEmoji,
+          avatarUrl: peer.avatarUrl,
         });
         return next;
       });
@@ -548,6 +550,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           displayName: profileRef.current.displayName,
           avatarColor: profileRef.current.avatarColor,
           avatarEmoji: profileRef.current.avatarEmoji,
+          avatarUrl: profileRef.current.avatarUrl ?? "",
         });
         socket.emit("voice:join", voiceChannelId);
       } catch (e) {

@@ -1,5 +1,12 @@
 import { AVATAR_COLORS, AVATAR_EMOJIS } from "./identity";
 
+function metaAvatarUrl(raw) {
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim();
+  if (!t.startsWith("https://") || t.length > 600) return undefined;
+  return t;
+}
+
 /** Map Supabase user → in-app identity (clientId = user id). */
 export function userToIdentity(user) {
   if (!user?.id) return null;
@@ -8,6 +15,7 @@ export function userToIdentity(user) {
   const displayName = String(
     rawName || (user.email && user.email.split("@")[0]) || "Utilisateur"
   ).slice(0, 32);
+  const avatarUrl = metaAvatarUrl(m.avatar_url);
   return {
     clientId: user.id,
     displayName,
@@ -17,6 +25,7 @@ export function userToIdentity(user) {
       typeof m.avatar_emoji === "string" && m.avatar_emoji
         ? m.avatar_emoji.slice(0, 4)
         : "👤",
+    ...(avatarUrl ? { avatarUrl } : {}),
   };
 }
 

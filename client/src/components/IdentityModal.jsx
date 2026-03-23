@@ -20,13 +20,13 @@ export function IdentityModal({ onComplete }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
       <div
-        className="w-full max-w-md rounded-lg border border-white/10 bg-discord-sidebar p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-discord-border bg-discord-sidebar p-6 shadow-2xl shadow-black/50"
         role="dialog"
         aria-labelledby="identity-title"
       >
-        <h1 id="identity-title" className="text-xl font-semibold text-white">
+        <h1 id="identity-title" className="text-xl font-semibold text-discord-text">
           Choose your identity
         </h1>
         <p className="mt-1 text-sm text-discord-muted">
@@ -58,7 +58,7 @@ export function IdentityModal({ onComplete }) {
                   title={c}
                   onClick={() => setColor(c)}
                   className={`h-9 w-9 rounded-full ring-2 ring-offset-2 ring-offset-discord-sidebar transition ${
-                    color === c ? "ring-white" : "ring-transparent hover:ring-white/40"
+                    color === c ? "ring-discord-accent" : "ring-transparent hover:ring-discord-border"
                   }`}
                   style={{ backgroundColor: c }}
                 />

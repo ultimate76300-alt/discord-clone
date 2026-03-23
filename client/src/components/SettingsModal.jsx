@@ -6,7 +6,7 @@ import {
   saveVoiceSettings,
 } from "../lib/voiceSettings";
 
-export function SettingsModal({ onClose, onSaved }) {
+export function SettingsModal({ onClose, onSaved, profileSection }) {
   const [form, setForm] = useState(() => loadVoiceSettings());
   const [devices, setDevices] = useState([]);
 
@@ -51,14 +51,14 @@ export function SettingsModal({ onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
       <div
-        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-white/10 bg-discord-sidebar shadow-2xl"
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-discord-border bg-discord-sidebar shadow-2xl shadow-black/50"
         role="dialog"
         aria-labelledby="settings-title"
       >
-        <div className="border-b border-white/10 px-5 py-4">
-          <h2 id="settings-title" className="text-lg font-semibold text-white">
+        <div className="border-b border-discord-border px-5 py-4">
+          <h2 id="settings-title" className="text-lg font-semibold text-discord-text">
             Paramètres audio & vidéo
           </h2>
           <p className="mt-1 text-sm text-discord-muted">
@@ -68,6 +68,12 @@ export function SettingsModal({ onClose, onSaved }) {
 
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <div className="scroll-discord flex-1 overflow-y-auto px-5 py-4 space-y-6">
+            {profileSection ? (
+              <>
+                {profileSection}
+                <div className="border-b border-discord-border" />
+              </>
+            ) : null}
             <section>
               <h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-discord-muted">
                 Microphone
@@ -150,7 +156,7 @@ export function SettingsModal({ onClose, onSaved }) {
             </section>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-discord-elevated px-5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-discord-border bg-discord-elevated px-5 py-3">
             <button
               type="button"
               onClick={reset}

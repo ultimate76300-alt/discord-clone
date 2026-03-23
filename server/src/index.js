@@ -57,6 +57,27 @@ app.use((req, res, next) => {
 });
 app.use(cors({ origin: corsAllow }));
 
+/**
+ * Config Supabase pour le navigateur au runtime (pas seulement au build Vite).
+ * Sur Railway, définir SUPABASE_URL + SUPABASE_ANON_KEY (ou VITE_SUPABASE_*), puis redéployer :
+ * le bundle n’a plus besoin d’embarquer les VITE_* au moment du build.
+ * La clé anon est déjà publique (équivalent à l’inclure dans le JS).
+ */
+app.get("/api/client-env.json", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const supabaseUrl = (
+    process.env.SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+    ""
+  ).trim();
+  const supabaseAnonKey = (
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    ""
+  ).trim();
+  res.json({ supabaseUrl, supabaseAnonKey });
+});
+
 if (fs.existsSync(CLIENT_DIST)) {
   app.use(express.static(CLIENT_DIST));
   app.get("*", (req, res, next) => {
@@ -101,7 +122,7 @@ if (supabaseServer) {
   });
 }
 
-/** @type {Map<string, { displayName: string; avatarColor: string; avatarEmoji: string; clientId: string }>} */
+/** @type {Map<string, { displayName: string; avatarColor: string; avatarEmoji: string; clientId: string; avatarUrl?: string }>} */
 const identities = new Map();
 
 /** @type {Map<string, string | null>} socketId -> text channel id */
@@ -110,7 +131,7 @@ const textChannelBySocket = new Map();
 /** @type {Map<string, string | null>} socketId -> voice channel id */
 const voiceChannelBySocket = new Map();
 
-/** @type {Record<string, Array<{ id: string; clientId: string; displayName: string; avatarColor: string; avatarEmoji: string; text: string; ts: number }>>} */
+/** @type {Record<string, Array<{ id: string; clientId: string; displayName: string; avatarColor: string; avatarEmoji: string; avatarUrl?: string; text: string; ts: number }>>} */
 const messagesByChannel = {};
 
 const TEXT_CHANNELS = ["general", "random", "dev", "off-topic"];
@@ -146,13 +167,27 @@ function broadcastPresence() {
   io.emit("presence:update", { users: buildPresenceList() });
 }
 
+/** Only https URLs; used for profile photos (e.g. Supabase Storage public URL). */
+function sanitizeAvatarUrl(raw) {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim();
+  if (t.length < 16 || t.length > 600) return null;
+  try {
+    const u = new URL(t);
+    if (u.protocol !== "https:") return null;
+    return t;
+  } catch {
+    return null;
+  }
+}
+
 io.on("connection", (socket) => {
   socket.emit("channels:config", { text: TEXT_CHANNELS, voice: VOICE_CHANNELS });
   socket.emit("presence:update", { users: buildPresenceList() });
 
   socket.on("identity:set", (payload) => {
     if (!payload || typeof payload !== "object") return;
-    const { clientId, displayName, avatarColor, avatarEmoji } = payload;
+    const { clientId, displayName, avatarColor, avatarEmoji, avatarUrl } = payload;
     if (!displayName || typeof displayName !== "string") return;
     const verifiedId = socket.data.supabaseUserId;
     const resolvedClientId =
@@ -161,12 +196,15 @@ io.on("connection", (socket) => {
         : typeof clientId === "string"
           ? clientId
           : socket.id;
-    identities.set(socket.id, {
+    const next = {
       clientId: resolvedClientId,
       displayName: displayName.slice(0, 32),
       avatarColor: typeof avatarColor === "string" ? avatarColor : "#5865f2",
       avatarEmoji: typeof avatarEmoji === "string" ? avatarEmoji.slice(0, 4) : "👤",
-    });
+    };
+    const url = sanitizeAvatarUrl(avatarUrl);
+    if (url) next.avatarUrl = url;
+    identities.set(socket.id, next);
     broadcastPresence();
   });
 
@@ -193,6 +231,7 @@ io.on("connection", (socket) => {
       displayName: profile.displayName,
       avatarColor: profile.avatarColor,
       avatarEmoji: profile.avatarEmoji,
+      ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
       text,
       ts: Date.now(),
     };

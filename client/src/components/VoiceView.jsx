@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isLikelyScreenCaptureTrack } from "../lib/mediaHints";
 import { SCREEN_PRESET_LABELS } from "../lib/voiceSettings";
+import { AvatarBubble } from "./AvatarBubble";
 
 function FocusModal({ stream, title, subtitle, onClose }) {
   const videoRef = useRef(null);
@@ -18,25 +19,25 @@ function FocusModal({ stream, title, subtitle, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex flex-col bg-black/95 p-4"
+      className="fixed inset-0 z-[90] flex flex-col bg-slate-950/92 p-4 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 pb-3">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold text-white">{title}</h2>
-          {subtitle ? <p className="text-sm text-discord-muted">{subtitle}</p> : null}
+          <h2 className="truncate text-lg font-semibold text-slate-100">{title}</h2>
+          {subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="shrink-0 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+          className="shrink-0 rounded-lg bg-slate-700/80 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600"
         >
           Fermer
         </button>
       </div>
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-black">
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-slate-900">
         {hasVideo ? (
           <video
             ref={videoRef}
@@ -46,7 +47,7 @@ function FocusModal({ stream, title, subtitle, onClose }) {
             className="h-full w-full object-contain"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-discord-muted">
+          <div className="flex h-full items-center justify-center text-slate-500">
             Pas de flux vidéo
           </div>
         )}
@@ -59,6 +60,7 @@ function VideoTile({
   label,
   color,
   emoji,
+  avatarUrl,
   stream,
   mutedAudio,
   isScreen,
@@ -66,6 +68,11 @@ function VideoTile({
   remoteControls,
 }) {
   const videoRef = useRef(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
+
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [avatarUrl]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -79,7 +86,7 @@ function VideoTile({
   const hasVideo = stream?.getVideoTracks().some((t) => t.readyState === "live");
 
   return (
-    <div className="flex min-h-[140px] min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-black/40 sm:min-h-[180px]">
+    <div className="flex min-h-[140px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-discord-border bg-discord-card shadow-sm sm:min-h-[180px]">
       <div className="relative aspect-video w-full bg-discord-elevated">
         {hasVideo ? (
           <button
@@ -95,10 +102,19 @@ function VideoTile({
               muted
               className="h-full w-full object-contain transition group-hover:brightness-110"
             />
-            <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
+            <span className="pointer-events-none absolute bottom-2 right-2 rounded bg-slate-900/80 px-2 py-0.5 text-[10px] text-slate-100 opacity-0 transition group-hover:opacity-100">
               Cliquer pour agrandir
             </span>
           </button>
+        ) : avatarUrl && !avatarBroken ? (
+          <div className="relative flex h-full w-full items-center justify-center bg-discord-elevated">
+            <img
+              src={avatarUrl}
+              alt=""
+              className="h-full w-full object-cover"
+              onError={() => setAvatarBroken(true)}
+            />
+          </div>
         ) : (
           <div
             className="flex h-full w-full items-center justify-center text-5xl"
@@ -108,14 +124,21 @@ function VideoTile({
           </div>
         )}
         {isScreen && (
-          <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
+          <span className="pointer-events-none absolute left-2 top-2 rounded bg-slate-900/80 px-2 py-0.5 text-xs text-slate-100">
             Écran
           </span>
         )}
       </div>
-      <div className="flex flex-col gap-2 border-t border-white/5 bg-discord-sidebar px-2 py-2">
+      <div className="flex flex-col gap-2 border-t border-discord-border bg-discord-sidebar px-2 py-2">
         <div className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">{label}</span>
+          <AvatarBubble
+            avatarUrl={avatarUrl}
+            avatarColor={color}
+            avatarEmoji={emoji}
+            className="h-8 w-8 shrink-0"
+            textClassName="text-sm"
+          />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-discord-text">{label}</span>
           {mutedAudio && (
             <span className="text-xs text-discord-muted" title="Muet">
               🔇
@@ -123,14 +146,14 @@ function VideoTile({
           )}
         </div>
         {remoteControls ? (
-          <div className="flex flex-wrap items-center gap-2 border-t border-white/5 pt-2">
+          <div className="flex flex-wrap items-center gap-2 border-t border-discord-border pt-2">
             <button
               type="button"
               onClick={remoteControls.onToggleMute}
               className={`rounded px-2 py-1 text-xs font-medium ${
                 remoteControls.mixMuted
-                  ? "bg-red-500/30 text-red-200"
-                  : "bg-white/10 text-discord-text hover:bg-white/15"
+                  ? "bg-red-950/60 text-red-200 ring-1 ring-red-500/30"
+                  : "bg-discord-elevated text-discord-text ring-1 ring-discord-border hover:bg-discord-hover"
               }`}
               title={remoteControls.mixMuted ? "Réactiver le son de ce participant" : "Couper le son de ce participant"}
             >
@@ -170,6 +193,7 @@ export function VoiceView({
   peerMix,
   onPeerVolume,
   onPeerMuteToggle,
+  headerTrailing,
 }) {
   const [focus, setFocus] = useState(null);
   const local = localStreamRef.current;
@@ -203,8 +227,8 @@ export function VoiceView({
           role="status"
           aria-live="polite"
         >
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/85 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-sm">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" aria-hidden />
+          <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/35 bg-amber-950/50 px-4 py-2 text-sm font-medium text-amber-100 shadow-lg backdrop-blur-sm">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden />
             Partage d&apos;écran activé
           </span>
         </div>
@@ -218,10 +242,10 @@ export function VoiceView({
         />
       ) : null}
 
-      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-black/20 px-4 py-2 shadow-sm">
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-discord-border bg-discord-elevated px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-lg">🔊</span>
-          <h2 className="text-sm font-bold text-white">{channelId}</h2>
+          <h2 className="text-sm font-bold text-discord-text">{channelId}</h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-xs text-discord-muted">
@@ -264,6 +288,7 @@ export function VoiceView({
               <path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z" />
             </svg>
           </button>
+          {headerTrailing ? <div className="flex shrink-0 items-center">{headerTrailing}</div> : null}
         </div>
       </header>
 
@@ -274,6 +299,7 @@ export function VoiceView({
             label={localLabel}
             color={profile.avatarColor}
             emoji={profile.avatarEmoji}
+            avatarUrl={profile.avatarUrl}
             stream={local}
             mutedAudio
             isScreen={screenOn && localHasVideo}
@@ -286,6 +312,7 @@ export function VoiceView({
               displayName: "Invité",
               avatarColor: "#5865f2",
               avatarEmoji: "👤",
+              avatarUrl: undefined,
             };
             const vt = stream.getVideoTracks()[0];
             const isScreen = vt ? isLikelyScreenCaptureTrack(vt) : false;
@@ -296,6 +323,7 @@ export function VoiceView({
                 label={meta.displayName}
                 color={meta.avatarColor}
                 emoji={meta.avatarEmoji}
+                avatarUrl={meta.avatarUrl}
                 stream={stream}
                 mutedAudio={false}
                 isScreen={isScreen}

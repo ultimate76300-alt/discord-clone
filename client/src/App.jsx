@@ -11,9 +11,14 @@ import { VoiceView } from "./components/VoiceView";
 import { UserBar } from "./components/UserBar";
 import { RemoteVoiceAudios } from "./components/RemoteVoiceAudios";
 import { SettingsModal } from "./components/SettingsModal";
+import { ProfilePhotoSettings } from "./components/ProfilePhotoSettings";
 import { ConnectedUsersTab } from "./components/ConnectedUsersTab";
 import { useVoiceConnection } from "./hooks/useVoiceConnection";
 import { loadVoiceSettings, saveVoiceSettings } from "./lib/voiceSettings";
+import { syncProfileToSupabase } from "./lib/syncProfile";
+import { useFriends } from "./hooks/useFriends";
+import { useDmMessages } from "./hooks/useDmMessages";
+import { DmChatView } from "./components/DmChatView";
 
 const DEFAULT_TEXT = ["general", "random", "dev", "off-topic"];
 const DEFAULT_VOICE = ["Lobby", "Gaming", "Study"];
@@ -51,6 +56,8 @@ export default function App() {
   const [voiceSettings, setVoiceSettings] = useState(() => loadVoiceSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [peerMix, setPeerMix] = useState(() => new Map());
+  const [selectedDmPeerId, setSelectedDmPeerId] = useState(null);
+  const [friendAddError, setFriendAddError] = useState(null);
 
   useEffect(() => {
     if (!useSupabaseAuth || !supabase) return;
@@ -79,6 +86,29 @@ export default function App() {
     }
     return guestIdentity;
   }, [useSupabaseAuth, session, guestIdentity]);
+
+  useEffect(() => {
+    if (!useSupabaseAuth || !session?.user?.id || !identity) return;
+    void syncProfileToSupabase(session.user.id, identity);
+  }, [useSupabaseAuth, session?.user?.id, identity]);
+
+  const myUserId = session?.user?.id;
+
+  const {
+    friends,
+    incoming,
+    outgoing,
+    sendFriendRequest,
+    acceptRequest,
+    declineRequest,
+    cancelOutgoing,
+  } = useFriends(Boolean(useSupabaseAuth && myUserId), myUserId);
+
+  const dmActive = Boolean(useSupabaseAuth && mainPane === "dm" && selectedDmPeerId);
+  const { messages: dmMessages, loading: dmLoading, error: dmError, ready: dmReady, sendMessage: sendDmMessage } =
+    useDmMessages(dmActive, myUserId, selectedDmPeerId);
+
+  const selectedDmPeer = friends.find((f) => f.id === selectedDmPeerId);
 
   const accessToken = useSupabaseAuth ? session?.access_token ?? null : null;
 
@@ -176,6 +206,7 @@ export default function App() {
       displayName: identity.displayName,
       avatarColor: identity.avatarColor,
       avatarEmoji: identity.avatarEmoji,
+      avatarUrl: identity.avatarUrl ?? "",
     });
   }, [identity, connected, socket]);
 
@@ -205,21 +236,39 @@ export default function App() {
   const handleSelectText = useCallback((id) => {
     setSelectedTextId(id);
     setMainPane("text");
+    setSelectedDmPeerId(null);
   }, []);
 
   const handleSelectVoice = useCallback((id) => {
     setConnectedVoiceId(id);
     setMainPane("voice");
+    setSelectedDmPeerId(null);
     setCameraOn(false);
     setScreenOn(false);
+  }, []);
+
+  const handleSelectDmPeer = useCallback((peerId) => {
+    setSelectedDmPeerId(peerId);
+    setMainPane("dm");
   }, []);
 
   const handleDisconnectVoice = useCallback(() => {
     setConnectedVoiceId(null);
     setMainPane("text");
+    setSelectedDmPeerId(null);
     setCameraOn(false);
     setScreenOn(false);
   }, []);
+
+  const handleSendFriendRequest = useCallback(
+    async (raw) => {
+      setFriendAddError(null);
+      const r = await sendFriendRequest(raw);
+      if (!r.ok) setFriendAddError(r.message);
+      return r;
+    },
+    [sendFriendRequest]
+  );
 
   const sendChat = useCallback(
     (text) => {
@@ -290,15 +339,12 @@ export default function App() {
     );
   }
 
+  const connectedUsersTab = (
+    <ConnectedUsersTab socket={socket} connected={connected} myClientId={identity.clientId} />
+  );
+
   return (
     <div className="flex h-[100dvh] flex-col bg-discord-bg">
-      <header className="flex h-12 shrink-0 items-center justify-end border-b border-black/20 bg-discord-elevated px-3">
-        <ConnectedUsersTab
-          socket={socket}
-          connected={connected}
-          myClientId={identity.clientId}
-        />
-      </header>
       <div className="flex min-h-0 flex-1">
         <Sidebar
           textChannels={textChannels}
@@ -309,6 +355,18 @@ export default function App() {
           onSelectText={handleSelectText}
           onSelectVoice={handleSelectVoice}
           onDisconnectVoice={handleDisconnectVoice}
+          friendsEnabled={useSupabaseAuth}
+          friends={friends}
+          incoming={incoming}
+          outgoing={outgoing}
+          selectedDmPeerId={selectedDmPeerId}
+          onSelectDmPeer={handleSelectDmPeer}
+          friendAddError={friendAddError}
+          onClearFriendAddError={() => setFriendAddError(null)}
+          onSendFriendRequest={handleSendFriendRequest}
+          onAcceptRequest={(id) => void acceptRequest(id)}
+          onDeclineRequest={(id) => void declineRequest(id)}
+          onCancelOutgoing={(id) => void cancelOutgoing(id)}
         />
         <main className="flex min-w-0 flex-1 flex-col">
           {mainPane === "text" && (
@@ -318,8 +376,39 @@ export default function App() {
               connected={connected}
               connectionError={socketError}
               onSend={sendChat}
+              headerTrailing={connectedUsersTab}
             />
           )}
+          {mainPane === "dm" ? (
+            selectedDmPeerId && selectedDmPeer ? (
+              <DmChatView
+                peerDisplayName={selectedDmPeer.displayName}
+                peerAvatarUrl={selectedDmPeer.avatarUrl}
+                selfUserId={myUserId}
+                selfDisplayName={identity.displayName}
+                selfAvatarUrl={identity.avatarUrl}
+                selfAvatarColor={identity.avatarColor}
+                selfAvatarEmoji={identity.avatarEmoji}
+                messages={dmMessages}
+                loading={dmLoading}
+                error={dmError}
+                ready={dmReady}
+                headerTrailing={connectedUsersTab}
+                onSend={async (text) => {
+                  await sendDmMessage(text);
+                }}
+              />
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col bg-discord-bg">
+                <header className="flex h-12 shrink-0 items-center justify-end border-b border-discord-border bg-discord-elevated px-3">
+                  {connectedUsersTab}
+                </header>
+                <div className="flex flex-1 items-center justify-center text-sm text-discord-muted">
+                  Choisis une conversation dans la liste Amis.
+                </div>
+              </div>
+            )
+          ) : null}
           {mainPane === "voice" && connectedVoiceId && (
             <VoiceView
               channelId={connectedVoiceId}
@@ -337,6 +426,7 @@ export default function App() {
               peerMix={peerMix}
               onPeerVolume={onPeerVolume}
               onPeerMuteToggle={onPeerMuteToggle}
+              headerTrailing={connectedUsersTab}
             />
           )}
         </main>
@@ -368,6 +458,16 @@ export default function App() {
         <SettingsModal
           onClose={() => setSettingsOpen(false)}
           onSaved={(s) => setVoiceSettings(s)}
+          profileSection={
+            useSupabaseAuth && session?.user ? (
+              <ProfilePhotoSettings
+                userId={session.user.id}
+                avatarUrl={identity.avatarUrl}
+                avatarColor={identity.avatarColor}
+                avatarEmoji={identity.avatarEmoji}
+              />
+            ) : null
+          }
         />
       ) : null}
     </div>

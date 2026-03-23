@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AvatarBubble } from "./AvatarBubble";
 
 /**
  * Onglet en haut à droite : liste des personnes connectées (pseudo), mise à jour temps réel.
@@ -40,25 +41,25 @@ export function ConnectedUsersTab({ socket, connected, myClientId }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={!connected}
-        className="flex items-center gap-2 rounded-lg border border-white/10 bg-discord-sidebar px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-discord-hover disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex items-center gap-2 rounded-lg border border-discord-border bg-discord-elevated px-3 py-1.5 text-sm font-medium text-discord-text transition hover:bg-discord-hover disabled:cursor-not-allowed disabled:opacity-40"
         title={connected ? "Qui est en ligne" : "Hors ligne"}
         aria-expanded={open}
         aria-haspopup="dialog"
       >
         <span className="flex h-2 w-2 rounded-full bg-discord-green" aria-hidden />
         <span>En ligne</span>
-        <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-xs tabular-nums text-discord-muted">
+        <span className="rounded-md bg-discord-hover px-1.5 py-0.5 text-xs tabular-nums text-discord-muted">
           {users.length}
         </span>
       </button>
 
       {open && connected ? (
         <div
-          className="absolute right-0 top-[calc(100%+6px)] z-[60] w-[min(100vw-1.5rem,18rem)] rounded-lg border border-white/10 bg-discord-sidebar py-2 shadow-xl"
+          className="absolute right-0 top-[calc(100%+6px)] z-[60] w-[min(100vw-1.5rem,18rem)] rounded-lg border border-discord-border bg-discord-sidebar py-2 shadow-xl"
           role="dialog"
           aria-label="Utilisateurs connectés"
         >
-          <div className="border-b border-white/10 px-3 pb-2">
+          <div className="border-b border-discord-border px-3 pb-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-discord-muted">
               Connectés maintenant
             </p>
@@ -79,15 +80,15 @@ export function ConnectedUsersTab({ socket, connected, myClientId }) {
                     key={u.socketId}
                     className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-discord-hover/80"
                   >
-                    <span
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base"
-                      style={{ backgroundColor: u.avatarColor }}
-                    >
-                      {u.avatarEmoji}
-                    </span>
+                    <AvatarBubble
+                      avatarUrl={u.avatarUrl}
+                      avatarColor={u.avatarColor}
+                      avatarEmoji={u.avatarEmoji}
+                      title={u.displayName}
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-white">
+                        <span className="truncate text-sm font-medium text-discord-text">
                           {u.displayName}
                         </span>
                         {self ? (

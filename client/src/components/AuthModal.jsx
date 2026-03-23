@@ -66,13 +66,13 @@ export function AuthModal() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
       <div
-        className="w-full max-w-md rounded-lg border border-white/10 bg-discord-sidebar p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-discord-border bg-discord-sidebar p-6 shadow-2xl shadow-black/50"
         role="dialog"
         aria-labelledby="auth-title"
       >
-        <h1 id="auth-title" className="text-xl font-semibold text-white">
+        <h1 id="auth-title" className="text-xl font-semibold text-discord-text">
           {mode === "login" ? "Connexion" : "Créer un compte"}
         </h1>
         <p className="mt-1 text-sm text-discord-muted">
@@ -89,7 +89,7 @@ export function AuthModal() {
             }}
             className={`flex-1 rounded py-2 text-sm font-medium transition ${
               mode === "login"
-                ? "bg-discord-hover text-white"
+                ? "bg-discord-hover text-discord-text ring-1 ring-discord-border"
                 : "text-discord-muted hover:text-discord-text"
             }`}
           >
@@ -104,7 +104,7 @@ export function AuthModal() {
             }}
             className={`flex-1 rounded py-2 text-sm font-medium transition ${
               mode === "register"
-                ? "bg-discord-hover text-white"
+                ? "bg-discord-hover text-discord-text ring-1 ring-discord-border"
                 : "text-discord-muted hover:text-discord-text"
             }`}
           >
@@ -205,7 +205,7 @@ export function AuthModal() {
                     title={c}
                     onClick={() => setAvatar((a) => ({ ...a, avatar_color: c }))}
                     className={`h-9 w-9 rounded-full ring-2 ring-offset-2 ring-offset-discord-sidebar transition ${
-                      avatar.avatar_color === c ? "ring-white" : "ring-transparent hover:ring-white/40"
+                      avatar.avatar_color === c ? "ring-discord-accent" : "ring-transparent hover:ring-discord-border"
                     }`}
                     style={{ backgroundColor: c }}
                   />

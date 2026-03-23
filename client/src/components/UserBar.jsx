@@ -1,3 +1,5 @@
+import { AvatarBubble } from "./AvatarBubble";
+
 export function UserBar({
   profile,
   muted,
@@ -9,15 +11,15 @@ export function UserBar({
   onSignOut,
 }) {
   return (
-    <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-black/20 bg-discord-elevated px-2">
-      <div
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base"
-        style={{ backgroundColor: profile.avatarColor }}
-      >
-        {profile.avatarEmoji}
-      </div>
+    <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-discord-border bg-discord-elevated px-2">
+      <AvatarBubble
+        avatarUrl={profile.avatarUrl}
+        avatarColor={profile.avatarColor}
+        avatarEmoji={profile.avatarEmoji}
+        title={profile.displayName}
+      />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-white">{profile.displayName}</div>
+        <div className="truncate text-sm font-medium text-discord-text">{profile.displayName}</div>
         {connectedVoiceId ? (
           <div className="truncate text-xs text-discord-green">Voice · {connectedVoiceId}</div>
         ) : (

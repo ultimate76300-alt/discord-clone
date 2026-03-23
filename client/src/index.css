@@ -1,24 +1,27 @@
 @import "tailwindcss";
 
+/* Thème type Cursor / IDE sombre : noir, gris, accent bleu */
 @theme {
-  --color-discord-bg: #36393f;
-  --color-discord-sidebar: #2f3136;
-  --color-discord-input: #40444b;
-  --color-discord-elevated: #32353b;
-  --color-discord-hover: #3c3f44;
-  --color-discord-text: #dcddde;
-  --color-discord-muted: #72767d;
-  --color-discord-accent: #5865f2;
-  --color-discord-green: #3ba55d;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-discord-bg: #1e1e1e;
+  --color-discord-sidebar: #252526;
+  --color-discord-input: #3c3c3c;
+  --color-discord-elevated: #2d2d2d;
+  --color-discord-hover: #3e3e42;
+  --color-discord-text: #cccccc;
+  --color-discord-muted: #858585;
+  --color-discord-accent: #3794ff;
+  --color-discord-green: #73c991;
+  --color-discord-border: #3c3c3c;
+  --color-discord-card: #252526;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
 }
 
-/* Scrollbar (WebKit) */
 .scroll-discord::-webkit-scrollbar {
   width: 8px;
 }
 .scroll-discord::-webkit-scrollbar-thumb {
-  background: #202225;
+  background: #4e4e52;
   border-radius: 4px;
 }
 .scroll-discord::-webkit-scrollbar-track {
