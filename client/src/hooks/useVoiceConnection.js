@@ -1,5 +1,46 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_VOICE_SETTINGS, SCREEN_SHARE_PRESETS } from "../lib/voiceSettings";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { isLikelyScreenCaptureTrack } from "../lib/mediaHints";
+import {
+  DEFAULT_VOICE_SETTINGS,
+  SCREEN_SHARE_PRESETS,
+  screenPresetTargetFramerate,
+} from "../lib/voiceSettings";
+
+function tuneVideoTrackContentHint(track) {
+  if (!track || track.kind !== "video") return;
+  try {
+    track.contentHint = isLikelyScreenCaptureTrack(track) ? "detail" : "motion";
+  } catch {
+    /* ignore */
+  }
+}
+
+async function applyOutboundVideoParams(sender, track, presetKey) {
+  if (!sender?.track || track?.kind !== "video") return;
+  const screen = isLikelyScreenCaptureTrack(track);
+  const fps = screenPresetTargetFramerate(presetKey);
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) {
+      params.encodings = [{}];
+    }
+    const e = params.encodings[0];
+    if (screen) {
+      e.maxFramerate = fps;
+      e.maxBitrate = fps >= 55 ? 10_000_000 : 6_000_000;
+      e.degradationPreference = "maintain-resolution";
+      e.scaleResolutionDownBy = 1;
+    } else {
+      e.maxFramerate = 30;
+      e.maxBitrate = 1_800_000;
+      e.degradationPreference = "balanced";
+      delete e.scaleResolutionDownBy;
+    }
+    await sender.setParameters(params);
+  } catch (err) {
+    console.warn("applyOutboundVideoParams", err);
+  }
+}
 
 function getIceServers() {
   const raw = import.meta.env.VITE_ICE_SERVERS;
@@ -60,6 +101,8 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   const micGainNodeRef = useRef(null);
   const micSourceNodeRef = useRef(null);
   const rawMicStreamRef = useRef(null);
+  const lastScreenPresetRef = useRef("720p30");
+  const flushOutboundVideoEncodingsRef = useRef(() => {});
 
   const micConstraintKey = useMemo(
     () =>
@@ -80,6 +123,28 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   );
 
   const bumpLocal = useCallback(() => setLocalRenderTick((n) => n + 1), []);
+
+  useLayoutEffect(() => {
+    flushOutboundVideoEncodingsRef.current = () => {
+      const stream = localStreamRef.current;
+      const video = stream?.getVideoTracks().find((t) => t.readyState === "live");
+      if (!video) return;
+      tuneVideoTrackContentHint(video);
+      const preset =
+        lastScreenPresetRef.current || micSettingsRef.current?.screenPreset || "720p30";
+      for (const pc of pcsRef.current.values()) {
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video" && s.track === video);
+        if (sender) void applyOutboundVideoParams(sender, video, preset);
+      }
+    };
+  });
+
+  const scheduleOutboundVideoFlush = useCallback(() => {
+    const run = () => flushOutboundVideoEncodingsRef.current();
+    queueMicrotask(run);
+    setTimeout(run, 150);
+    setTimeout(run, 500);
+  }, []);
 
   const cleanupPeer = useCallback((peerId) => {
     const pc = pcsRef.current.get(peerId);
@@ -228,7 +293,11 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
         pc._suppressNegotiation = false;
       }
     }
-  }, [socket]);
+    const ls = localStreamRef.current;
+    if (ls?.getVideoTracks().some((t) => t.readyState === "live")) {
+      scheduleOutboundVideoFlush();
+    }
+  }, [socket, scheduleOutboundVideoFlush]);
 
   const scheduleRenegotiate = useCallback(() => {
     if (renegotiateTimeoutRef.current) clearTimeout(renegotiateTimeoutRef.current);
@@ -243,6 +312,13 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
       if (pcsRef.current.has(peerId)) return pcsRef.current.get(peerId);
       const pc = newPeerConnection();
       pcsRef.current.set(peerId, pc);
+
+      pc.addEventListener("connectionstatechange", () => {
+        if (pc.connectionState === "connected") {
+          queueMicrotask(() => flushOutboundVideoEncodingsRef.current());
+          setTimeout(() => flushOutboundVideoEncodingsRef.current(), 200);
+        }
+      });
 
       pc.onicecandidate = (ev) => {
         if (ev.candidate && socket?.connected) {
@@ -309,7 +385,10 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
       }
     }
     bumpLocal();
-  }, [bumpLocal]);
+    if (stream.getVideoTracks().some((t) => t.readyState === "live")) {
+      scheduleOutboundVideoFlush();
+    }
+  }, [bumpLocal, scheduleOutboundVideoFlush]);
 
   const syncTracksToPeers = useCallback(() => {
     syncTracksToPeersInner();
@@ -506,6 +585,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           audio: false,
         });
         const vt = cam.getVideoTracks()[0];
+        tuneVideoTrackContentHint(vt);
         stream.addTrack(vt);
       } else {
         videoTracks.forEach((t) => {
@@ -531,18 +611,31 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   const toggleScreenShare = useCallback(
     async (enabled, preset) => {
       const stream = await getLocalStream();
-      const key = preset || micSettingsRef.current.screenPreset || "1080p30";
-      const videoConstraints = SCREEN_SHARE_PRESETS[key] || SCREEN_SHARE_PRESETS["1080p30"];
+      const key = preset || micSettingsRef.current.screenPreset || "720p30";
+      lastScreenPresetRef.current = key;
+      const videoConstraints = SCREEN_SHARE_PRESETS[key] || SCREEN_SHARE_PRESETS["720p30"];
       if (enabled) {
         for (const t of stream.getVideoTracks()) {
           t.stop();
           stream.removeTrack(t);
         }
-        const screen = await navigator.mediaDevices.getDisplayMedia({
-          video: videoConstraints,
-          audio: false,
-        });
+        let screen;
+        try {
+          screen = await navigator.mediaDevices.getDisplayMedia({
+            video: videoConstraints,
+            audio: false,
+            preferCurrentTab: false,
+            selfBrowserSurface: "exclude",
+            systemAudio: "exclude",
+          });
+        } catch {
+          screen = await navigator.mediaDevices.getDisplayMedia({
+            video: videoConstraints,
+            audio: false,
+          });
+        }
         const vt = screen.getVideoTracks()[0];
+        tuneVideoTrackContentHint(vt);
         stream.addTrack(vt);
         vt.addEventListener("ended", () => {
           stopAllVideoTracks();

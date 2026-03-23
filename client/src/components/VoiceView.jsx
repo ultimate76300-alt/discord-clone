@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isLikelyScreenCaptureTrack } from "../lib/mediaHints";
 import { SCREEN_PRESET_LABELS } from "../lib/voiceSettings";
 
 function FocusModal({ stream, title, subtitle, onClose }) {
@@ -178,6 +179,13 @@ export function VoiceView({
 
   const remoteEntries = [...remoteStreams.entries()];
 
+  const anyoneScreenSharing =
+    (screenOn && localHasVideo) ||
+    remoteEntries.some(([, stream]) => {
+      const t = stream.getVideoTracks()[0];
+      return t?.readyState === "live" && isLikelyScreenCaptureTrack(t);
+    });
+
   const openFocus = useCallback((kind, peerId, stream, title, subtitle) => {
     if (!stream?.getVideoTracks().some((t) => t.readyState === "live")) return;
     setFocus({ kind, peerId, stream, title, subtitle });
@@ -188,7 +196,19 @@ export function VoiceView({
   const focusStream = focus?.stream ?? null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-discord-bg">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-discord-bg">
+      {anyoneScreenSharing ? (
+        <div
+          className="pointer-events-none fixed bottom-20 left-1/2 z-[70] -translate-x-1/2 sm:bottom-6"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/85 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-sm">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" aria-hidden />
+            Partage d&apos;écran activé
+          </span>
+        </div>
+      ) : null}
       {focus ? (
         <FocusModal
           stream={focusStream}
@@ -268,9 +288,7 @@ export function VoiceView({
               avatarEmoji: "👤",
             };
             const vt = stream.getVideoTracks()[0];
-            const isScreen =
-              vt?.label?.toLowerCase().includes("screen") ||
-              vt?.label?.toLowerCase().includes("display");
+            const isScreen = vt ? isLikelyScreenCaptureTrack(vt) : false;
             const mix = peerMix.get(peerId) || { volume: 1, muted: false };
             return (
               <VideoTile
