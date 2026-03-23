@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
+function isMissingGuildRpcError(e) {
+  if (!e) return false;
+  const msg = `${e.message || ""} ${e.details || ""} ${e.hint || ""}`.toLowerCase();
+  if (e.code === "PGRST202") return true;
+  if (msg.includes("create_guild_with_defaults")) return true;
+  if (msg.includes("could not find the function")) return true;
+  if (msg.includes("schema cache")) return true;
+  return false;
+}
+
 export function usePrivateGuilds(enabled, userId) {
   const [guilds, setGuilds] = useState([]);
   const [incomingInvites, setIncomingInvites] = useState([]);
@@ -74,14 +84,54 @@ export function usePrivateGuilds(enabled, userId) {
   const createGuild = useCallback(
     async (name) => {
       if (!supabase) return { ok: false, message: "Supabase indisponible" };
+      if (!userId) return { ok: false, message: "Non connecté" };
       const t = name.trim();
       if (t.length < 1 || t.length > 64) return { ok: false, message: "Nom invalide (1–64 car.)" };
-      const { data, error: e } = await supabase.rpc("create_guild_with_defaults", { p_name: t });
-      if (e) return { ok: false, message: e.message };
+
+      const rpc = await supabase.rpc("create_guild_with_defaults", { p_name: t });
+      if (!rpc.error) {
+        await load();
+        return { ok: true, guildId: rpc.data };
+      }
+
+      if (!isMissingGuildRpcError(rpc.error)) {
+        return { ok: false, message: rpc.error.message };
+      }
+
+      const ins = await supabase
+        .from("guilds")
+        .insert({ name: t, owner_id: userId })
+        .select("id")
+        .single();
+      if (ins.error) {
+        return {
+          ok: false,
+          message:
+            ins.error.message +
+            (ins.error.message.includes("row-level security")
+              ? " — exécute aussi la politique guilds_select_owner (fichier supabase/private-guilds.sql)."
+              : ""),
+        };
+      }
+      const gid = ins.data.id;
+
+      const mem = await supabase.from("guild_members").insert({
+        guild_id: gid,
+        user_id: userId,
+        role: "owner",
+      });
+      if (mem.error) return { ok: false, message: mem.error.message };
+
+      const ch = await supabase.from("guild_channels").insert([
+        { guild_id: gid, name: "général", kind: "text", position: 0 },
+        { guild_id: gid, name: "Salon vocal", kind: "voice", position: 1 },
+      ]);
+      if (ch.error) return { ok: false, message: ch.error.message };
+
       await load();
-      return { ok: true, guildId: data };
+      return { ok: true, guildId: gid };
     },
-    [load]
+    [load, userId]
   );
 
   const sendGuildInvite = useCallback(

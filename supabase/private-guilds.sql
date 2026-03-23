@@ -97,6 +97,14 @@ on public.guilds for delete
 to authenticated
 using (owner_id = auth.uid());
 
+-- Le propriétaire peut lire son serveur tout de suite après l’INSERT (avant la ligne guild_members),
+-- nécessaire pour .insert().select('id') depuis le client si la RPC n’est pas utilisée.
+drop policy if exists "guilds_select_owner" on public.guilds;
+create policy "guilds_select_owner"
+on public.guilds for select
+to authenticated
+using (owner_id = auth.uid());
+
 -- guild_members
 create policy "gm_select_same_guild"
 on public.guild_members for select
@@ -300,6 +308,9 @@ end;
 $$;
 
 grant execute on function public.create_guild_with_defaults (text) to authenticated;
+
+-- Après création / remplacement de fonctions : rafraîchir le cache de l’API (SQL Editor, rôle postgres)
+-- select pg_notify('pgrst', 'reload schema');
 
 -- Accepter une invitation (ajoute le membre)
 create or replace function public.accept_guild_invite (p_invite_id uuid)
