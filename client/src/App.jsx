@@ -7,7 +7,9 @@ import { ChatView } from "./components/ChatView";
 import { VoiceView } from "./components/VoiceView";
 import { UserBar } from "./components/UserBar";
 import { RemoteVoiceAudios } from "./components/RemoteVoiceAudios";
+import { SettingsModal } from "./components/SettingsModal";
 import { useVoiceConnection } from "./hooks/useVoiceConnection";
+import { loadVoiceSettings, saveVoiceSettings } from "./lib/voiceSettings";
 
 const DEFAULT_TEXT = ["general", "random", "dev", "off-topic"];
 const DEFAULT_VOICE = ["Lobby", "Gaming", "Study"];
@@ -39,6 +41,9 @@ export default function App() {
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
+  const [voiceSettings, setVoiceSettings] = useState(() => loadVoiceSettings());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [peerMix, setPeerMix] = useState(() => new Map());
 
   const socketUrl = useMemo(() => socketBaseUrl(), []);
   const socket = useMemo(
@@ -59,7 +64,26 @@ export default function App() {
 
   const voice = useVoiceConnection(socket, connectedVoiceId, identity || {}, {
     onScreenShareEnd,
+    micSettings: voiceSettings,
   });
+
+  const onPeerVolume = useCallback((peerId, volume) => {
+    setPeerMix((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(peerId) || { volume: 1, muted: false };
+      next.set(peerId, { ...cur, volume });
+      return next;
+    });
+  }, []);
+
+  const onPeerMuteToggle = useCallback((peerId) => {
+    setPeerMix((prev) => {
+      const next = new Map(prev);
+      const cur = next.get(peerId) || { volume: 1, muted: false };
+      next.set(peerId, { ...cur, muted: !cur.muted });
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     voice.setMuted(muted);
@@ -184,7 +208,7 @@ export default function App() {
   const onToggleScreen = useCallback(
     async (next) => {
       try {
-        await voice.toggleScreenShare(next);
+        await voice.toggleScreenShare(next, voiceSettings.screenPreset);
         setScreenOn(next);
         if (next) setCameraOn(true);
         else setCameraOn(false);
@@ -194,8 +218,16 @@ export default function App() {
         setCameraOn(false);
       }
     },
-    [voice]
+    [voice, voiceSettings.screenPreset]
   );
+
+  const onScreenPresetChange = useCallback((preset) => {
+    setVoiceSettings((prev) => {
+      const next = { ...prev, screenPreset: preset };
+      saveVoiceSettings({ screenPreset: preset });
+      return next;
+    });
+  }, []);
 
   if (!identity) {
     return <IdentityModal onComplete={setIdentity} />;
@@ -236,6 +268,11 @@ export default function App() {
               screenOn={screenOn}
               onToggleCamera={onToggleCamera}
               onToggleScreen={onToggleScreen}
+              screenPreset={voiceSettings.screenPreset}
+              onScreenPresetChange={onScreenPresetChange}
+              peerMix={peerMix}
+              onPeerVolume={onPeerVolume}
+              onPeerMuteToggle={onPeerMuteToggle}
             />
           )}
         </main>
@@ -247,9 +284,20 @@ export default function App() {
         onToggleMute={() => setMuted((m) => !m)}
         onToggleDeafen={() => setDeafened((d) => !d)}
         connectedVoiceId={connectedVoiceId}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       {connectedVoiceId ? (
-        <RemoteVoiceAudios remoteStreams={voice.remoteStreams} deafened={deafened} />
+        <RemoteVoiceAudios
+          remoteStreams={voice.remoteStreams}
+          deafened={deafened}
+          peerMix={peerMix}
+        />
+      ) : null}
+      {settingsOpen ? (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          onSaved={(s) => setVoiceSettings(s)}
+        />
       ) : null}
     </div>
   );

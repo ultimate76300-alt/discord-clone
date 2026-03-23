@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_VOICE_SETTINGS, SCREEN_SHARE_PRESETS } from "../lib/voiceSettings";
 
-/** Optional: Railway / Vite build var, JSON array of RTCIceServer objects (incl. TURN). */
 function getIceServers() {
   const raw = import.meta.env.VITE_ICE_SERVERS;
   if (typeof raw === "string" && raw.trim()) {
@@ -25,8 +25,24 @@ function shouldOffer(myId, peerId) {
   return myId < peerId;
 }
 
+function buildAudioConstraints(settings) {
+  const audio = {
+    echoCancellation: settings.echoCancellation,
+    noiseSuppression: settings.noiseSuppression,
+    autoGainControl: settings.autoGainControl,
+  };
+  if (settings.micDeviceId) {
+    audio.deviceId = { exact: settings.micDeviceId };
+  }
+  const supported = navigator.mediaDevices.getSupportedConstraints?.() || {};
+  if (settings.voiceIsolation && supported.voiceIsolation) {
+    audio.voiceIsolation = true;
+  }
+  return audio;
+}
+
 export function useVoiceConnection(socket, voiceChannelId, profile, options = {}) {
-  const { onScreenShareEnd } = options;
+  const { onScreenShareEnd, micSettings = DEFAULT_VOICE_SETTINGS } = options;
   const [remoteStreams, setRemoteStreams] = useState(() => new Map());
   const [peerMeta, setPeerMeta] = useState(() => new Map());
   const [localRenderTick, setLocalRenderTick] = useState(0);
@@ -36,6 +52,32 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   const renegotiateTimeoutRef = useRef(null);
   const profileRef = useRef(profile);
   profileRef.current = profile;
+
+  const micSettingsRef = useRef(micSettings);
+  micSettingsRef.current = micSettings;
+
+  const micCtxRef = useRef(null);
+  const micGainNodeRef = useRef(null);
+  const micSourceNodeRef = useRef(null);
+  const rawMicStreamRef = useRef(null);
+
+  const micConstraintKey = useMemo(
+    () =>
+      JSON.stringify({
+        d: micSettings.micDeviceId,
+        e: micSettings.echoCancellation,
+        n: micSettings.noiseSuppression,
+        a: micSettings.autoGainControl,
+        v: micSettings.voiceIsolation,
+      }),
+    [
+      micSettings.micDeviceId,
+      micSettings.echoCancellation,
+      micSettings.noiseSuppression,
+      micSettings.autoGainControl,
+      micSettings.voiceIsolation,
+    ]
+  );
 
   const bumpLocal = useCallback(() => setLocalRenderTick((n) => n + 1), []);
 
@@ -57,25 +99,109 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
     });
   }, []);
 
+  const stopMicPipeline = useCallback(() => {
+    if (micSourceNodeRef.current) {
+      try {
+        micSourceNodeRef.current.disconnect();
+      } catch {
+        /* ignore */
+      }
+      micSourceNodeRef.current = null;
+    }
+    if (micGainNodeRef.current) {
+      try {
+        micGainNodeRef.current.disconnect();
+      } catch {
+        /* ignore */
+      }
+      micGainNodeRef.current = null;
+    }
+    if (rawMicStreamRef.current) {
+      rawMicStreamRef.current.getTracks().forEach((t) => t.stop());
+      rawMicStreamRef.current = null;
+    }
+  }, []);
+
+  const closeAudioContext = useCallback(async () => {
+    stopMicPipeline();
+    if (micCtxRef.current && micCtxRef.current.state !== "closed") {
+      try {
+        await micCtxRef.current.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    micCtxRef.current = null;
+  }, [stopMicPipeline]);
+
   const cleanupAll = useCallback(() => {
     if (renegotiateTimeoutRef.current) {
       clearTimeout(renegotiateTimeoutRef.current);
       renegotiateTimeoutRef.current = null;
     }
     for (const id of [...pcsRef.current.keys()]) cleanupPeer(id);
+    void closeAudioContext();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
-  }, [cleanupPeer]);
+  }, [cleanupPeer, closeAudioContext]);
+
+  const ensureMicTrackOnStream = useCallback(async () => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+
+    for (const t of [...stream.getAudioTracks()]) {
+      stream.removeTrack(t);
+      t.stop();
+    }
+    stopMicPipeline();
+
+    let ctx = micCtxRef.current;
+    if (!ctx || ctx.state === "closed") {
+      ctx = new AudioContext();
+      micCtxRef.current = ctx;
+    }
+    if (ctx.state === "suspended") {
+      await ctx.resume().catch(() => {});
+    }
+
+    const constraints = buildAudioConstraints(micSettingsRef.current);
+    let raw;
+    try {
+      raw = await navigator.mediaDevices.getUserMedia({ audio: constraints, video: false });
+    } catch (e) {
+      if (constraints.voiceIsolation) {
+        const { voiceIsolation: _v, ...rest } = constraints;
+        raw = await navigator.mediaDevices.getUserMedia({ audio: rest, video: false });
+      } else {
+        throw e;
+      }
+    }
+    rawMicStreamRef.current = raw;
+
+    const rawTrack = raw.getAudioTracks()[0];
+    const source = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
+    const gain = ctx.createGain();
+    gain.gain.value = micSettingsRef.current.inputGain ?? 1;
+    const dest = ctx.createMediaStreamDestination();
+    source.connect(gain);
+    gain.connect(dest);
+
+    micSourceNodeRef.current = source;
+    micGainNodeRef.current = gain;
+
+    const out = dest.stream.getAudioTracks()[0];
+    stream.addTrack(out);
+  }, [stopMicPipeline]);
 
   const getLocalStream = useCallback(async () => {
     if (!localStreamRef.current) {
-      const audio = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = audio;
+      localStreamRef.current = new MediaStream();
     }
+    await ensureMicTrackOnStream();
     return localStreamRef.current;
-  }, []);
+  }, [ensureMicTrackOnStream]);
 
   const attachLocalTracks = useCallback((pc) => {
     const stream = localStreamRef.current;
@@ -160,9 +286,64 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
     [attachLocalTracks, createPeerConnection, socket]
   );
 
+  const syncTracksToPeersInner = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const audio = stream.getAudioTracks()[0];
+    const video = stream.getVideoTracks()[0];
+    for (const pc of pcsRef.current.values()) {
+      if (audio) {
+        const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+        if (aSender) {
+          if (aSender.track !== audio) aSender.replaceTrack(audio);
+        } else {
+          pc.addTrack(audio, stream);
+        }
+      }
+      const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
+      if (video) {
+        if (vSender) vSender.replaceTrack(video);
+        else pc.addTrack(video, stream);
+      } else if (vSender?.track) {
+        vSender.replaceTrack(null);
+      }
+    }
+    bumpLocal();
+  }, [bumpLocal]);
+
+  const syncTracksToPeers = useCallback(() => {
+    syncTracksToPeersInner();
+    if (pcsRef.current.size > 0) scheduleRenegotiate();
+  }, [syncTracksToPeersInner, scheduleRenegotiate]);
+
   useEffect(() => {
     voiceChannelRef.current = voiceChannelId;
   }, [voiceChannelId]);
+
+  useEffect(() => {
+    if (micGainNodeRef.current) {
+      micGainNodeRef.current.gain.value = micSettings.inputGain ?? 1;
+    }
+  }, [micSettings.inputGain]);
+
+  useEffect(() => {
+    if (!voiceChannelId || !localStreamRef.current) return;
+    void (async () => {
+      try {
+        await ensureMicTrackOnStream();
+        syncTracksToPeersInner();
+        if (pcsRef.current.size > 0) scheduleRenegotiate();
+      } catch (e) {
+        console.error("mic settings / device change", e);
+      }
+    })();
+  }, [
+    voiceChannelId,
+    micConstraintKey,
+    ensureMicTrackOnStream,
+    syncTracksToPeersInner,
+    scheduleRenegotiate,
+  ]);
 
   useEffect(() => {
     if (!socket) return;
@@ -217,7 +398,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           try {
             await pc.setLocalDescription({ type: "rollback" });
           } catch {
-            /* ignore — browser may not support rollback */
+            /* ignore */
           }
         }
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
@@ -302,32 +483,6 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
     };
   }, [socket, voiceChannelId, getLocalStream, cleanupAll]);
 
-  const syncTracksToPeers = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const audio = stream.getAudioTracks()[0];
-    const video = stream.getVideoTracks()[0];
-    for (const pc of pcsRef.current.values()) {
-      if (audio) {
-        const aSender = pc.getSenders().find((s) => s.track?.kind === "audio");
-        if (aSender) {
-          if (aSender.track !== audio) aSender.replaceTrack(audio);
-        } else {
-          pc.addTrack(audio, stream);
-        }
-      }
-      const vSender = pc.getSenders().find((s) => s.track?.kind === "video");
-      if (video) {
-        if (vSender) vSender.replaceTrack(video);
-        else pc.addTrack(video, stream);
-      } else if (vSender?.track) {
-        vSender.replaceTrack(null);
-      }
-    }
-    bumpLocal();
-    if (pcsRef.current.size > 0) scheduleRenegotiate();
-  }, [bumpLocal, scheduleRenegotiate]);
-
   const setMuted = useCallback((muted) => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -374,15 +529,17 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
   }, [syncTracksToPeers]);
 
   const toggleScreenShare = useCallback(
-    async (enabled) => {
+    async (enabled, preset) => {
       const stream = await getLocalStream();
+      const key = preset || micSettingsRef.current.screenPreset || "1080p30";
+      const videoConstraints = SCREEN_SHARE_PRESETS[key] || SCREEN_SHARE_PRESETS["1080p30"];
       if (enabled) {
         for (const t of stream.getVideoTracks()) {
           t.stop();
           stream.removeTrack(t);
         }
         const screen = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
+          video: videoConstraints,
           audio: false,
         });
         const vt = screen.getVideoTracks()[0];

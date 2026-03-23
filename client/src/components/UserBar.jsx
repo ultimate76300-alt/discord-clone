@@ -5,6 +5,7 @@ export function UserBar({
   onToggleMute,
   onToggleDeafen,
   connectedVoiceId,
+  onOpenSettings,
 }) {
   return (
     <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-black/20 bg-discord-elevated px-2">
@@ -49,7 +50,8 @@ export function UserBar({
         </button>
         <button
           type="button"
-          title="Settings"
+          title="Paramètres"
+          onClick={() => onOpenSettings?.()}
           className="rounded p-2 text-discord-muted transition hover:bg-discord-hover hover:text-discord-text"
         >
           <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
