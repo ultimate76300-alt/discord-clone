@@ -72,6 +72,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(() => !useSupabaseAuth);
   const [connected, setConnected] = useState(false);
   const [socketError, setSocketError] = useState(null);
+  const [profileRow, setProfileRow] = useState(null);
   const [textChannels, setTextChannels] = useState(() =>
     DEFAULT_TEXT.map((id) => ({ id, name: id }))
   );
@@ -135,6 +136,31 @@ export default function App() {
   }, [useSupabaseAuth, session?.user?.id, identity]);
 
   const myUserId = session?.user?.id;
+
+  useEffect(() => {
+    if (!useSupabaseAuth || !myUserId || !supabase) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("display_name, avatar_url")
+          .eq("id", myUserId)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error || !data) return;
+        setProfileRow({
+          displayName: String(data.display_name || "").slice(0, 64),
+          avatarUrl: data.avatar_url ?? undefined,
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [useSupabaseAuth, myUserId]);
 
   const {
     friends,
@@ -258,7 +284,15 @@ export default function App() {
     setCameraOn(false);
   }, []);
 
-  const voice = useVoiceConnection(socket, connectedVoiceId, identity || {}, {
+  const effectiveIdentity = profileRow?.displayName
+    ? {
+        ...identity,
+        displayName: profileRow.displayName,
+        avatarUrl: profileRow.avatarUrl,
+      }
+    : identity;
+
+  const voice = useVoiceConnection(socket, connectedVoiceId, effectiveIdentity || {}, {
     onScreenShareEnd,
     micSettings: voiceSettings,
     voiceGuildId: activeGuildId,
@@ -353,15 +387,15 @@ export default function App() {
   }, [socket, useSupabaseAuth, session?.access_token, guestIdentity]);
 
   useEffect(() => {
-    if (!identity || !connected) return;
+    if (!effectiveIdentity || !connected) return;
     socket.emit("identity:set", {
-      clientId: identity.clientId,
-      displayName: identity.displayName,
-      avatarColor: identity.avatarColor,
-      avatarEmoji: identity.avatarEmoji,
-      avatarUrl: identity.avatarUrl ?? "",
+      clientId: effectiveIdentity?.clientId,
+      displayName: effectiveIdentity?.displayName,
+      avatarColor: effectiveIdentity?.avatarColor,
+      avatarEmoji: effectiveIdentity?.avatarEmoji,
+      avatarUrl: effectiveIdentity?.avatarUrl ?? "",
     });
-  }, [identity, connected, socket]);
+  }, [effectiveIdentity, connected, socket]);
 
   useEffect(() => {
     if (!connected || !identity) return;
@@ -814,10 +848,10 @@ export default function App() {
                 peerDisplayName={selectedDmPeer.displayName}
                 peerAvatarUrl={selectedDmPeer.avatarUrl}
                 selfUserId={myUserId}
-                selfDisplayName={identity.displayName}
-                selfAvatarUrl={identity.avatarUrl}
-                selfAvatarColor={identity.avatarColor}
-                selfAvatarEmoji={identity.avatarEmoji}
+                selfDisplayName={effectiveIdentity.displayName}
+                selfAvatarUrl={effectiveIdentity.avatarUrl}
+                selfAvatarColor={effectiveIdentity.avatarColor}
+                selfAvatarEmoji={effectiveIdentity.avatarEmoji}
                 messages={dmMessages}
                 loading={dmLoading}
                 error={dmError}
@@ -842,7 +876,7 @@ export default function App() {
             <VoiceView
               channelId={connectedVoiceId}
               channelTitle={selectedVoiceLabel}
-              profile={identity}
+              profile={effectiveIdentity}
               localStreamRef={voice.localStreamRef}
               localRenderTick={voice.localRenderTick}
               remoteStreams={voice.remoteStreams}
@@ -862,7 +896,7 @@ export default function App() {
         </main>
       </div>
       <UserBar
-        profile={identity}
+        profile={effectiveIdentity}
         muted={muted}
         deafened={deafened}
         onToggleMute={() => setMuted((m) => !m)}
