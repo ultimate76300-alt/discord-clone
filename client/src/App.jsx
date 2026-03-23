@@ -92,6 +92,7 @@ export default function App() {
   const [awaitingChannelSync, setAwaitingChannelSync] = useState(false);
   const [mainPane, setMainPane] = useState("text");
   const [connectedVoiceId, setConnectedVoiceId] = useState(null);
+  const [connectedVoiceGuildId, setConnectedVoiceGuildId] = useState(null);
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -315,7 +316,7 @@ export default function App() {
   const voice = useVoiceConnection(socket, connectedVoiceId, effectiveIdentity || {}, {
     onScreenShareEnd,
     micSettings: voiceSettings,
-    voiceGuildId: activeGuildId,
+    voiceGuildId: connectedVoiceGuildId,
   });
 
   const onPeerVolume = useCallback((peerId, volume) => {
@@ -350,6 +351,21 @@ export default function App() {
     }
 
     const onConnect = () => {
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "site-empty-slow",
+          hypothesisId: "H2",
+          location: "client/src/App.jsx:socket:connect",
+          message: "Socket connected",
+          data: { useSupabaseAuth, hasToken: Boolean(session?.access_token) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setSocketError(null);
       setConnected(true);
     };
@@ -383,6 +399,21 @@ export default function App() {
     };
     const onDisconnect = () => setConnected(false);
     const onConnectError = (err) => {
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "site-empty-slow",
+          hypothesisId: "H2",
+          location: "client/src/App.jsx:socket:connect_error",
+          message: "Socket connect error",
+          data: { message: err?.message || null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setSocketError(err?.message || "Connection failed");
     };
     const onReconnectFailed = () => {
@@ -441,12 +472,13 @@ export default function App() {
       if (connectedVoiceId && connectedVoiceId !== id) void playVoiceLeaveChime();
       void playVoiceJoinChime();
       setConnectedVoiceId(id);
+      setConnectedVoiceGuildId(activeGuildId ?? null);
       setMainPane("voice");
       setSelectedDmPeerId(null);
       setCameraOn(false);
       setScreenOn(false);
     },
-    [connectedVoiceId]
+    [connectedVoiceId, activeGuildId]
   );
 
   const handleSelectDmPeer = useCallback((peerId) => {
@@ -458,6 +490,7 @@ export default function App() {
     // On joue aussi le son pour la personne qui quitte (elle ne reçoit pas l'event socket).
     void playVoiceLeaveChime();
     setConnectedVoiceId(null);
+    setConnectedVoiceGuildId(null);
     setMainPane("text");
     setSelectedDmPeerId(null);
     setCameraOn(false);
@@ -472,7 +505,6 @@ export default function App() {
     setAwaitingChannelSync(false);
     setMessages([]);
     setActiveGuildId(null);
-    setConnectedVoiceId(null);
     setMainPane("text");
     setSelectedDmPeerId(null);
     setCameraOn(false);
@@ -486,7 +518,6 @@ export default function App() {
     setSelectedTextId("");
     setMessages([]);
     setActiveGuildId(guildId);
-    setConnectedVoiceId(null);
     setMainPane("text");
     setSelectedDmPeerId(null);
     setCameraOn(false);

@@ -17,6 +17,10 @@ function isPrivateDmVoiceId(channelId) {
   return typeof channelId === "string" && channelId.startsWith("dm:");
 }
 
+function isScreenShareAudioTrack(track) {
+  return Boolean(track && track.kind === "audio" && track.__screenShareAudio === true);
+}
+
 function tuneVideoTrackContentHint(track) {
   if (!track || track.kind !== "video") return;
   try {
@@ -639,6 +643,17 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
     syncTracksToPeers();
   }, [syncTracksToPeers]);
 
+  const stopScreenShareAudioTracks = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((t) => {
+      if (!isScreenShareAudioTrack(t)) return;
+      t.stop();
+      stream.removeTrack(t);
+    });
+    syncTracksToPeers();
+  }, [syncTracksToPeers]);
+
   const toggleScreenShare = useCallback(
     async (enabled, preset) => {
       const stream = await getLocalStream();
@@ -646,6 +661,7 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
       lastScreenPresetRef.current = key;
       const videoConstraints = SCREEN_SHARE_PRESETS[key] || SCREEN_SHARE_PRESETS["720p30"];
       if (enabled) {
+        stopScreenShareAudioTracks();
         for (const t of stream.getVideoTracks()) {
           t.stop();
           stream.removeTrack(t);
@@ -654,22 +670,32 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
         try {
           screen = await navigator.mediaDevices.getDisplayMedia({
             video: videoConstraints,
-            audio: false,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
             preferCurrentTab: false,
             selfBrowserSurface: "exclude",
-            systemAudio: "exclude",
+            systemAudio: "include",
           });
         } catch {
           screen = await navigator.mediaDevices.getDisplayMedia({
             video: videoConstraints,
-            audio: false,
+            audio: true,
           });
         }
         const vt = screen.getVideoTracks()[0];
         tuneVideoTrackContentHint(vt);
         stream.addTrack(vt);
+        const screenAudio = screen.getAudioTracks()[0];
+        if (screenAudio) {
+          screenAudio.__screenShareAudio = true;
+          stream.addTrack(screenAudio);
+        }
         vt.addEventListener("ended", () => {
           stopAllVideoTracks();
+          stopScreenShareAudioTracks();
           onScreenShareEnd?.();
         });
       } else {
@@ -677,10 +703,11 @@ export function useVoiceConnection(socket, voiceChannelId, profile, options = {}
           t.stop();
           stream.removeTrack(t);
         }
+        stopScreenShareAudioTracks();
       }
       syncTracksToPeers();
     },
-    [getLocalStream, syncTracksToPeers, stopAllVideoTracks, onScreenShareEnd]
+    [getLocalStream, syncTracksToPeers, stopAllVideoTracks, stopScreenShareAudioTracks, onScreenShareEnd]
   );
 
   return {

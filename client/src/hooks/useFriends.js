@@ -171,10 +171,10 @@ export function useFriends(enabled, myUserId) {
       if (UUID_RE.test(input)) {
         tid = input;
       } else {
-        // Attendu: <username>@<3 chiffres>
-        const m = input.match(/^(.+)@(\d{3})$/);
-        if (!m) return { ok: false, message: "Pseudo invalide. Exemple: desyntoxs@134" };
-        const handle = input.toLowerCase();
+        // Attendu: <username>#<3 chiffres> (compat: @ aussi).
+        const m = input.match(/^(.+)([#@])(\d{3})$/);
+        if (!m) return { ok: false, message: "Pseudo invalide. Exemple: utilisateur@123" };
+        const handle = `${m[1]}@${m[3]}`.toLowerCase();
         const { data: row, error: pErr } = await supabase
           .from("profiles")
           .select("id")

@@ -242,6 +242,21 @@ export function usePrivateGuilds(enabled, userId) {
         );
       }
     } catch (e) {
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "site-empty-slow",
+          hypothesisId: "H3",
+          location: "client/src/hooks/usePrivateGuilds.js:load:catch",
+          message: "Private guild load failed",
+          data: { userId, message: e?.message || "unknown", code: e?.code || null },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (seq !== loadSeq.current) return;
       const missing = isGuildTablesMissingError(e);
       setGuildTablesMissing(missing);

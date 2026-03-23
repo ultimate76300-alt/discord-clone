@@ -203,6 +203,16 @@ export function VoiceView({
     local?.getVideoTracks().some((t) => t.readyState === "live") ?? false;
 
   const remoteEntries = [...remoteStreams.entries()];
+  const remoteScreenPeerIds = remoteEntries
+    .filter(([, stream]) => {
+      const t = stream.getVideoTracks()[0];
+      return t?.readyState === "live" && isLikelyScreenCaptureTrack(t);
+    })
+    .map(([peerId]) => peerId);
+  const screenShareVolumePercent =
+    remoteScreenPeerIds.length > 0
+      ? Math.round(((peerMix.get(remoteScreenPeerIds[0])?.volume ?? 1) * 100))
+      : 100;
 
   const anyoneScreenSharing =
     (screenOn && localHasVideo) ||
@@ -232,6 +242,25 @@ export function VoiceView({
             <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" aria-hidden />
             Partage d&apos;écran activé
           </span>
+        </div>
+      ) : null}
+      {remoteScreenPeerIds.length > 0 ? (
+        <div className="fixed bottom-3 left-1/2 z-[72] w-[min(92vw,460px)] -translate-x-1/2 rounded-xl border border-discord-border bg-discord-elevated/95 px-3 py-2 shadow-xl backdrop-blur">
+          <label className="flex items-center gap-3 text-xs text-discord-muted">
+            <span className="shrink-0 text-discord-text">Volume partage</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={screenShareVolumePercent}
+              onChange={(e) => {
+                const v = Number(e.target.value) / 100;
+                remoteScreenPeerIds.forEach((peerId) => onPeerVolume(peerId, v));
+              }}
+              className="h-1 flex-1 accent-discord-accent"
+            />
+            <span className="w-10 shrink-0 text-right text-discord-text">{screenShareVolumePercent}%</span>
+          </label>
         </div>
       ) : null}
       {focus ? (

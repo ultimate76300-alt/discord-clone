@@ -18,12 +18,47 @@ export function AuthModal() {
     setError("");
     setInfo("");
     if (!supabase) return;
+    // #region agent log
+    fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+      body: JSON.stringify({
+        sessionId: "4bd8e4",
+        runId: "site-empty-slow",
+        hypothesisId: "H1",
+        location: "client/src/components/AuthModal.jsx:handleLogin:start",
+        message: "Login started",
+        data: { hasEmail: Boolean(email.trim()), passwordLen: password.length },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     setLoading(true);
     try {
       const { error: err } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
+      // #region agent log
+      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
+        body: JSON.stringify({
+          sessionId: "4bd8e4",
+          runId: "site-empty-slow",
+          hypothesisId: "H1",
+          location: "client/src/components/AuthModal.jsx:handleLogin:result",
+          message: "Login result",
+          data: {
+            hasError: Boolean(err),
+            errorMessage: err?.message || null,
+            errorCode: err?.code || null,
+            errorStatus: err?.status || null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       if (err) setError(err.message || "Connexion impossible.");
     } catch (e) {
       setError(e?.message || "Erreur réseau pendant la connexion.");
@@ -164,7 +199,7 @@ export function AuthModal() {
                 required
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="desyntoxs"
+                placeholder="utilisateur"
                 className="w-full rounded bg-discord-bg px-3 py-2 text-discord-text outline-none ring-discord-accent focus:ring-2"
               />
             </div>
