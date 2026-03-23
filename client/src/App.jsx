@@ -30,6 +30,7 @@ import {
   buildTextChatTarget,
   canonicalPublicTextChannelId,
 } from "./lib/textChatProtocol";
+import { playVoiceJoinChime, playVoiceLeaveChime } from "./lib/voiceChimes";
 
 const DEFAULT_TEXT = PUBLIC_TEXT_SLUGS;
 const DEFAULT_VOICE = ["Lobby", "Gaming", "Study"];
@@ -380,13 +381,19 @@ export default function App() {
     setSelectedDmPeerId(null);
   }, []);
 
-  const handleSelectVoice = useCallback((id) => {
-    setConnectedVoiceId(id);
-    setMainPane("voice");
-    setSelectedDmPeerId(null);
-    setCameraOn(false);
-    setScreenOn(false);
-  }, []);
+  const handleSelectVoice = useCallback(
+    (id) => {
+      // Déclenché dans le gesture utilisateur (clic) : le navigateur autorise plus facilement l'audio.
+      if (connectedVoiceId && connectedVoiceId !== id) void playVoiceLeaveChime();
+      void playVoiceJoinChime();
+      setConnectedVoiceId(id);
+      setMainPane("voice");
+      setSelectedDmPeerId(null);
+      setCameraOn(false);
+      setScreenOn(false);
+    },
+    [connectedVoiceId]
+  );
 
   const handleSelectDmPeer = useCallback((peerId) => {
     setSelectedDmPeerId(peerId);
@@ -394,6 +401,8 @@ export default function App() {
   }, []);
 
   const handleDisconnectVoice = useCallback(() => {
+    // On joue aussi le son pour la personne qui quitte (elle ne reçoit pas l'event socket).
+    void playVoiceLeaveChime();
     setConnectedVoiceId(null);
     setMainPane("text");
     setSelectedDmPeerId(null);

@@ -96,12 +96,18 @@ export function isGuildTablesMissingError(e) {
 
 export function usePrivateGuilds(enabled, userId) {
   const [guilds, setGuilds] = useState([]);
+  /** Permet de fusionner les icônes optimistes avec les données rechargées (évite fallback immédiat sur la lettre). */
+  const guildsRef = useRef([]);
   const [incomingInvites, setIncomingInvites] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [guildTablesMissing, setGuildTablesMissing] = useState(false);
   /** Évite qu’un load() démarré avant la création d’un serveur écrase la liste après coup. */
   const loadSeq = useRef(0);
+
+  useEffect(() => {
+    guildsRef.current = guilds;
+  }, [guilds]);
 
   const load = useCallback(async () => {
     if (!enabled || !userId || !supabase) return;
@@ -161,8 +167,24 @@ export function usePrivateGuilds(enabled, userId) {
         if (gErr) throw gErr;
         if (seq !== loadSeq.current) return;
         const roleByGid = new Map((memberships || []).map((m) => [m.guild_id, m.role]));
+        const prevIconsByGid = new Map(
+          (guildsRef.current || []).map((g) => [
+            g.id,
+            { iconUrl: g.iconUrl ?? null, iconBrandKey: g.iconBrandKey ?? null },
+          ])
+        );
         list = (guildRows || [])
           .map((g) => guildEntryFromRow(g, roleByGid))
+          .map((entry) => {
+            // Si la DB ne renvoie pas encore les colonnes icon_*, on conserve l'optimiste (immédiat après création).
+            if (!entry.iconUrl && !entry.iconBrandKey) {
+              const prev = prevIconsByGid.get(entry.id);
+              if (prev?.iconUrl || prev?.iconBrandKey) {
+                return { ...entry, iconUrl: prev.iconUrl, iconBrandKey: prev.iconBrandKey };
+              }
+            }
+            return entry;
+          })
           .filter((x) => x.id);
         list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
       }
