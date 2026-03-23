@@ -140,7 +140,8 @@ export function Sidebar({
             </div>
             <div className="mb-3 space-y-2 rounded-md bg-discord-card px-2 py-2 ring-1 ring-discord-border/80">
               <p className="px-0.5 text-[11px] text-discord-muted">
-                Collez l’UUID du compte (Paramètres → ton ID) puis envoyez une demande.
+                Collez un handle au format <code className="rounded bg-black/35 px-1 font-mono text-[10px]">username@XYZ</code>{" "}
+                ou l’UUID (Paramètres → ton ID), puis envoyez une demande.
               </p>
               <div className="flex gap-1">
                 <input
@@ -149,7 +150,7 @@ export function Sidebar({
                     setFriendInput(e.target.value);
                     onClearFriendAddError?.();
                   }}
-                  placeholder="UUID…"
+                  placeholder="desyntoxs@134 ou UUID…"
                   className="min-w-0 flex-1 rounded bg-discord-input px-2 py-1 text-xs text-discord-text outline-none placeholder:text-discord-muted/70"
                 />
                 <button

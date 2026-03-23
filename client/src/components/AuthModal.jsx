@@ -154,7 +154,7 @@ export function AuthModal() {
           <form onSubmit={handleRegister} className="mt-6 space-y-4">
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-discord-muted">
-                Pseudo affiché
+                Pseudo (sans @)
               </label>
               <input
                 autoFocus
@@ -162,7 +162,7 @@ export function AuthModal() {
                 required
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Comment vous appeler ?"
+                placeholder="desyntoxs"
                 className="w-full rounded bg-discord-bg px-3 py-2 text-discord-text outline-none ring-discord-accent focus:ring-2"
               />
             </div>

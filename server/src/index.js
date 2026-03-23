@@ -364,23 +364,40 @@ io.on("connection", (socket) => {
     if (!payload || typeof payload !== "object") return;
     const { clientId, displayName, avatarColor, avatarEmoji, avatarUrl } = payload;
     if (!displayName || typeof displayName !== "string") return;
-    const verifiedId = socket.data.supabaseUserId;
-    const resolvedClientId =
-      typeof verifiedId === "string"
-        ? verifiedId
-        : typeof clientId === "string"
-          ? clientId
-          : socket.id;
-    const next = {
-      clientId: resolvedClientId,
-      displayName: displayName.slice(0, 32),
-      avatarColor: typeof avatarColor === "string" ? avatarColor : "#5865f2",
-      avatarEmoji: typeof avatarEmoji === "string" ? avatarEmoji.slice(0, 4) : "👤",
-    };
-    const url = sanitizeAvatarUrl(avatarUrl);
-    if (url) next.avatarUrl = url;
-    identities.set(socket.id, next);
-    broadcastPresence();
+
+    void (async () => {
+      const verifiedId = socket.data.supabaseUserId;
+      const resolvedClientId =
+        typeof verifiedId === "string"
+          ? verifiedId
+          : typeof clientId === "string"
+            ? clientId
+            : socket.id;
+
+      // Le client envoie un displayName "base". Supabase stocke le handle unique
+      // (username@XYZ) : on remplace côté serveur pour que les messages/présences
+      // utilisent toujours le handle unique.
+      let resolvedDisplayName = displayName;
+      if (supabaseServer && typeof verifiedId === "string" && verifiedId) {
+        const { data: prof } = await supabaseServer
+          .from("profiles")
+          .select("display_name")
+          .eq("id", verifiedId)
+          .maybeSingle();
+        if (prof?.display_name) resolvedDisplayName = prof.display_name;
+      }
+
+      const next = {
+        clientId: resolvedClientId,
+        displayName: String(resolvedDisplayName).slice(0, 64),
+        avatarColor: typeof avatarColor === "string" ? avatarColor : "#5865f2",
+        avatarEmoji: typeof avatarEmoji === "string" ? avatarEmoji.slice(0, 4) : "👤",
+      };
+      const url = sanitizeAvatarUrl(avatarUrl);
+      if (url) next.avatarUrl = url;
+      identities.set(socket.id, next);
+      broadcastPresence();
+    })();
   });
 
   socket.on("guild:select", (raw) => {

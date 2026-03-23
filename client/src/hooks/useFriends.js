@@ -130,13 +130,33 @@ export function useFriends(enabled, myUserId) {
   const sendFriendRequest = useCallback(
     async (rawTargetId) => {
       if (!supabase || !myUserId) return { ok: false, message: "Non connecté" };
-      const tid = String(rawTargetId || "").trim();
-      if (!UUID_RE.test(tid)) {
-        return { ok: false, message: "ID invalide (UUID attendu)." };
+
+      const input = String(rawTargetId || "").trim();
+      if (!input) return { ok: false, message: "Cible manquante." };
+
+      // Support :
+      // - UUID (ancien mode)
+      // - handle "username@XYZ" (nouveau mode)
+      let tid = null;
+      if (UUID_RE.test(input)) {
+        tid = input;
+      } else {
+        // Attendu: <username>@<3 chiffres>
+        const m = input.match(/^(.+)@(\d{3})$/);
+        if (!m) return { ok: false, message: "Pseudo invalide. Exemple: desyntoxs@134" };
+        const handle = input.toLowerCase();
+        const { data: row, error: pErr } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("display_name", handle)
+          .maybeSingle();
+        if (pErr) return { ok: false, message: pErr.message };
+        if (!row?.id) return { ok: false, message: "Pseudo introuvable." };
+        tid = row.id;
       }
-      if (tid === myUserId) {
-        return { ok: false, message: "Tu ne peux pas t’ajouter toi-même." };
-      }
+
+      if (!tid) return { ok: false, message: "Cible invalide." };
+      if (tid === myUserId) return { ok: false, message: "Tu ne peux pas t’ajouter toi-même." };
 
       const { data: existing, error: exErr } = await supabase
         .from("friend_requests")
