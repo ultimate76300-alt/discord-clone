@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
+/** Tables guild_* absentes : exécuter supabase/private-guilds.sql dans le SQL Editor. */
+export const GUILD_SQL_SETUP_HINT =
+  "Ouvre Supabase → SQL Editor, colle tout le fichier supabase/private-guilds.sql du dépôt (après friends-dm.sql), exécute, puis recharge la page.";
+
 function isMissingGuildRpcError(e) {
   if (!e) return false;
   const msg = `${e.message || ""} ${e.details || ""} ${e.hint || ""}`.toLowerCase();
-  if (e.code === "PGRST202") return true;
+  if (e.code === "PGRST202" && msg.includes("function")) return true;
   if (msg.includes("create_guild_with_defaults")) return true;
   if (msg.includes("could not find the function")) return true;
-  if (msg.includes("schema cache")) return true;
+  return false;
+}
+
+export function isGuildTablesMissingError(e) {
+  if (!e) return false;
+  const msg = `${e.message || ""} ${e.details || ""} ${e.hint || ""}`.toLowerCase();
+  if (e.code === "PGRST205") return true;
+  if (msg.includes("could not find the table") && msg.includes("guild")) return true;
+  if (msg.includes("public.guilds")) return true;
+  if (msg.includes("guild_members") && (msg.includes("schema cache") || msg.includes("not find"))) return true;
+  if (msg.includes("relation") && msg.includes("guild") && msg.includes("does not exist")) return true;
   return false;
 }
 
@@ -16,6 +30,7 @@ export function usePrivateGuilds(enabled, userId) {
   const [incomingInvites, setIncomingInvites] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [guildTablesMissing, setGuildTablesMissing] = useState(false);
 
   const load = useCallback(async () => {
     if (!enabled || !userId || !supabase) return;
@@ -27,6 +42,7 @@ export function usePrivateGuilds(enabled, userId) {
         .select("role, guild_id, guilds(id, name, owner_id)")
         .eq("user_id", userId);
       if (mErr) throw mErr;
+      setGuildTablesMissing(false);
       const list = (memberships || [])
         .map((row) => {
           const g = row.guilds;
@@ -69,7 +85,9 @@ export function usePrivateGuilds(enabled, userId) {
         }))
       );
     } catch (e) {
-      setError(e?.message || "Erreur serveurs privés");
+      const missing = isGuildTablesMissingError(e);
+      setGuildTablesMissing(missing);
+      setError(missing ? GUILD_SQL_SETUP_HINT : e?.message || "Erreur serveurs privés");
       setGuilds([]);
       setIncomingInvites([]);
     } finally {
@@ -94,6 +112,10 @@ export function usePrivateGuilds(enabled, userId) {
         return { ok: true, guildId: rpc.data };
       }
 
+      if (isGuildTablesMissingError(rpc.error)) {
+        return { ok: false, message: GUILD_SQL_SETUP_HINT };
+      }
+
       if (!isMissingGuildRpcError(rpc.error)) {
         return { ok: false, message: rpc.error.message };
       }
@@ -104,6 +126,9 @@ export function usePrivateGuilds(enabled, userId) {
         .select("id")
         .single();
       if (ins.error) {
+        if (isGuildTablesMissingError(ins.error)) {
+          return { ok: false, message: GUILD_SQL_SETUP_HINT };
+        }
         return {
           ok: false,
           message:
@@ -180,6 +205,7 @@ export function usePrivateGuilds(enabled, userId) {
     incomingInvites,
     loading,
     error,
+    guildTablesMissing,
     reload: load,
     createGuild,
     sendGuildInvite,

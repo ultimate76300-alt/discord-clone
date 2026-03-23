@@ -120,6 +120,7 @@ export default function App() {
   const {
     guilds: privateGuildsList,
     incomingInvites: guildIncomingInvites,
+    guildTablesMissing,
     createGuild,
     sendGuildInvite,
     acceptGuildInvite,
@@ -504,6 +505,7 @@ export default function App() {
           onOpenManageGuild={() => setManageGuildOpen(true)}
           onAcceptGuildInvite={(id) => void handleAcceptGuildInvite(id)}
           onDeclineGuildInvite={(id) => void handleDeclineGuildInvite(id)}
+          guildTablesMissing={guildTablesMissing}
         />
         <main className="flex min-w-0 flex-1 flex-col">
           {mainPane === "text" && !selectedTextId.trim() ? (

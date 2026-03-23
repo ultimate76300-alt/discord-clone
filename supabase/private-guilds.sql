@@ -1,5 +1,10 @@
--- Serveurs privés AtomVoice : exécuter dans Supabase → SQL Editor (après friends-dm.sql).
--- Offre : création de serveur, salons texte/vocal, invitations entre amis, rôles admin, expulsion.
+-- =====================================================================
+-- OBLIGATOIRE pour les serveurs privés : copier TOUT ce fichier dans
+-- Supabase → SQL Editor → Run (une fois), APRÈS supabase/friends-dm.sql.
+-- Sans ça, l’erreur « Could not find the table public.guilds » est normale.
+-- =====================================================================
+--
+-- Création de serveur, salons texte/vocal, invitations entre amis, admins, exclusions.
 
 -- ---------------------------------------------------------------------------
 -- Tables

@@ -41,6 +41,7 @@ export function Sidebar({
   onOpenManageGuild,
   onAcceptGuildInvite,
   onDeclineGuildInvite,
+  guildTablesMissing = false,
 }) {
   const [friendInput, setFriendInput] = useState("");
 
@@ -62,6 +63,18 @@ export function Sidebar({
             <div className="mb-1 px-2 text-xs font-bold uppercase tracking-wide text-discord-muted">
               Espaces
             </div>
+            {guildTablesMissing ? (
+              <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-950/35 px-2 py-2 text-[11px] leading-snug text-amber-100/95">
+                <p className="font-semibold text-amber-200">Serveurs privés non configurés</p>
+                <p className="mt-1 text-amber-100/85">
+                  Dans <strong>Supabase</strong> → <strong>SQL Editor</strong>, exécute tout le fichier{" "}
+                  <code className="rounded bg-black/35 px-1 font-mono text-[10px]">private-guilds.sql</code>{" "}
+                  (dossier <code className="rounded bg-black/35 px-1 font-mono text-[10px]">supabase/</code> du
+                  projet), après <code className="rounded bg-black/35 px-1 font-mono text-[10px]">friends-dm.sql</code>
+                  . Puis recharge cette page.
+                </p>
+              </div>
+            ) : null}
             <div className="mb-3 space-y-0.5 rounded-md bg-discord-card/60 px-1 py-1 ring-1 ring-discord-border/60">
               <button
                 type="button"
@@ -96,8 +109,9 @@ export function Sidebar({
               ))}
               <button
                 type="button"
+                disabled={guildTablesMissing}
                 onClick={() => onOpenCreateGuild?.()}
-                className="mt-0.5 w-full rounded border border-dashed border-discord-border px-2 py-1.5 text-left text-[11px] text-discord-muted hover:border-discord-accent/60 hover:text-discord-accent"
+                className="mt-0.5 w-full rounded border border-dashed border-discord-border px-2 py-1.5 text-left text-[11px] text-discord-muted hover:border-discord-accent/60 hover:text-discord-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 + Créer un serveur privé
               </button>
