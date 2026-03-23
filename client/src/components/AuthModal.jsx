@@ -18,64 +18,14 @@ export function AuthModal() {
     setError("");
     setInfo("");
     if (!supabase) return;
-    // #region agent log
-    fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-      body: JSON.stringify({
-        sessionId: "4bd8e4",
-        runId: "rebuild-auth",
-        hypothesisId: "H1",
-        location: "client/src/components/AuthModal.jsx:handleLogin:start",
-        message: "Login started",
-        data: { hasEmail: Boolean(email.trim()), passwordLen: password.length },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     setLoading(true);
     try {
       const { error: err } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "rebuild-auth",
-          hypothesisId: "H1",
-          location: "client/src/components/AuthModal.jsx:handleLogin:result",
-          message: "Login result",
-          data: {
-            hasError: Boolean(err),
-            errorMessage: err?.message || null,
-            errorStatus: err?.status || null,
-            errorCode: err?.code || null,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (err) setError(err.message || "Connexion impossible.");
     } catch (e) {
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "rebuild-auth",
-          hypothesisId: "H1",
-          location: "client/src/components/AuthModal.jsx:handleLogin:exception",
-          message: "Login exception",
-          data: { message: e?.message || "unknown" },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(e?.message || "Erreur réseau pendant la connexion.");
     } finally {
       setLoading(false);

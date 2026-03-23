@@ -116,62 +116,17 @@ export default function App() {
     void supabase.auth
       .getSession()
       .then(({ data: { session: s }, error }) => {
-        // #region agent log
-        fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-          body: JSON.stringify({
-            sessionId: "4bd8e4",
-            runId: "rebuild-auth",
-            hypothesisId: "H2",
-            location: "client/src/App.jsx:auth:getSession",
-            message: "Initial getSession resolved",
-            data: { hasSession: Boolean(s?.access_token), hasError: Boolean(error), error: error?.message || null },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (!cancelled) {
           setSession(s);
           setAuthReady(true);
         }
       })
       .catch((e) => {
-        // #region agent log
-        fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-          body: JSON.stringify({
-            sessionId: "4bd8e4",
-            runId: "rebuild-auth",
-            hypothesisId: "H2",
-            location: "client/src/App.jsx:auth:getSession:exception",
-            message: "Initial getSession threw",
-            data: { message: e?.message || "unknown" },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         if (!cancelled) setAuthReady(true);
       });
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, s) => {
-      // #region agent log
-      fetch("http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "4bd8e4" },
-        body: JSON.stringify({
-          sessionId: "4bd8e4",
-          runId: "rebuild-auth",
-          hypothesisId: "H2",
-          location: "client/src/App.jsx:auth:onAuthStateChange",
-          message: "Auth state changed",
-          data: { event: _event, hasSession: Boolean(s?.access_token) },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setSession(s);
       setAuthReady(true);
     });
