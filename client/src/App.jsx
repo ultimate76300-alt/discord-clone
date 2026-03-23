@@ -141,6 +141,7 @@ export default function App() {
     incomingInvites: guildIncomingInvites,
     guildTablesMissing,
     loading: guildsLoading,
+    error: guildsLoadError,
     createGuild,
     sendGuildInvite,
     acceptGuildInvite,
@@ -585,6 +586,7 @@ export default function App() {
           onAcceptGuildInvite={(id) => void handleAcceptGuildInvite(id)}
           onDeclineGuildInvite={(id) => void handleDeclineGuildInvite(id)}
           guildTablesMissing={guildTablesMissing}
+          guildsLoadError={guildsLoadError}
         />
         <main className="flex min-w-0 flex-1 flex-col">
           {mainPane === "text" && !selectedTextId.trim() ? (

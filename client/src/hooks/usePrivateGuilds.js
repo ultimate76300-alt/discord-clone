@@ -74,6 +74,15 @@ function isMissingGuildRpcError(e) {
   return false;
 }
 
+function isMissingListMyGuildMembershipsRpcError(e) {
+  if (!e) return false;
+  const msg = `${e.message || ""} ${e.details || ""} ${e.hint || ""}`.toLowerCase();
+  if (e.code === "PGRST202" && msg.includes("function")) return true;
+  if (msg.includes("list_my_guild_memberships")) return true;
+  if (msg.includes("could not find the function")) return true;
+  return false;
+}
+
 export function isGuildTablesMissingError(e) {
   if (!e) return false;
   const msg = `${e.message || ""} ${e.details || ""} ${e.hint || ""}`.toLowerCase();
@@ -103,20 +112,30 @@ export function usePrivateGuilds(enabled, userId) {
       // S’assure que le JWT est bien chargé avant les requêtes RLS (sinon 0 ligne sans erreur au F5 / en prod).
       await supabase.auth.getSession();
 
-      // Deux requêtes : l’embed PostgREST `guilds(...)` peut renvoyer null selon RLS / cache,
-      // ce qui vidait la liste côté client alors que les lignes guild_members existent.
+      // 1) RPC security definer : liste fiable des membreships (évite RLS cassée sur guild_members).
+      // 2) Sinon requête table + retry (bases sans la RPC).
       let memberships;
       let mErr;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        if (attempt > 0) {
-          if (seq !== loadSeq.current) return;
-          await new Promise((r) => setTimeout(r, 450));
+      const rpcRes = await supabase.rpc("list_my_guild_memberships");
+      if (!rpcRes.error) {
+        memberships = (rpcRes.data ?? []).map((r) => ({
+          guild_id: r.guild_id,
+          role: r.role,
+        }));
+      } else if (isMissingListMyGuildMembershipsRpcError(rpcRes.error)) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (attempt > 0) {
+            if (seq !== loadSeq.current) return;
+            await new Promise((r) => setTimeout(r, 450));
+          }
+          const res = await supabase.from("guild_members").select("role, guild_id").eq("user_id", userId);
+          memberships = res.data;
+          mErr = res.error;
+          if (mErr) break;
+          if ((memberships?.length ?? 0) > 0) break;
         }
-        const res = await supabase.from("guild_members").select("role, guild_id").eq("user_id", userId);
-        memberships = res.data;
-        mErr = res.error;
-        if (mErr) break;
-        if ((memberships?.length ?? 0) > 0) break;
+      } else {
+        mErr = rpcRes.error;
       }
       if (mErr) throw mErr;
       if (seq !== loadSeq.current) return;

@@ -38,6 +38,7 @@ export function Sidebar({
   onAcceptGuildInvite,
   onDeclineGuildInvite,
   guildTablesMissing = false,
+  guildsLoadError = null,
 }) {
   const [friendInput, setFriendInput] = useState("");
 
@@ -64,6 +65,13 @@ export function Sidebar({
                   <code className="rounded bg-black/35 px-1 font-mono text-[10px]">private-guilds.sql</code> puis
                   recharge.
                 </p>
+              </div>
+            ) : null}
+
+            {guildsLoadError && !guildTablesMissing ? (
+              <div className="mb-3 rounded-md border border-red-500/35 bg-red-950/40 px-2 py-2 text-[11px] leading-snug text-red-100/95">
+                <p className="font-semibold text-red-200">Serveurs privés</p>
+                <p className="mt-1 text-red-100/90">{guildsLoadError}</p>
               </div>
             ) : null}
 

@@ -351,6 +351,25 @@ $$;
 
 grant execute on function public.accept_guild_invite (uuid) to authenticated;
 
+-- Liste des serveurs dont l’utilisateur est membre (security definer = pas de RLS sur cette lecture).
+-- Le client l’appelle en priorité pour éviter les listes vides au F5 si la policy SELECT guild_members pose problème.
+create or replace function public.list_my_guild_memberships ()
+returns table (
+  guild_id uuid,
+  role text
+)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select gm.guild_id, gm.role
+  from public.guild_members gm
+  where gm.user_id = auth.uid();
+$$;
+
+grant execute on function public.list_my_guild_memberships () to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Icônes serveur (image data-URL courte ou thème logo). Idempotent sur bases existantes.
 -- ---------------------------------------------------------------------------
