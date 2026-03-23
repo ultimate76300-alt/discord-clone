@@ -32,7 +32,7 @@ async function persistNewGuildIcons(gid, iconOpts) {
   const { iconUrl, iconBrandKey } = normalizeIconOpts(iconOpts || {});
   if (!iconUrl && !iconBrandKey) {
     // #region agent log
-    fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4bd8e4' }, body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H3_icon_opts_missing', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:earlyReturn', message: 'No iconUrl/iconBrandKey in opts', data: { gid }, timestamp: Date.now() }) }).catch(() => {});
+    fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H3_icon_opts_missing', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:earlyReturn', message: 'No iconUrl/iconBrandKey in opts', data: { gid }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     return { ok: true };
   }
@@ -43,13 +43,13 @@ async function persistNewGuildIcons(gid, iconOpts) {
     : { icon_brand_key: iconBrandKey, icon_url: null };
 
   // #region agent log
-  fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4bd8e4' }, body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H1_icon_update_error', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:update:before', message: 'Patching guild icon_*', data: { gid, hasIconUrl: !!iconUrl, iconBrandKey }, timestamp: Date.now() }) }).catch(() => {});
+  fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H1_icon_update_error', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:update:before', message: 'Patching guild icon_*', data: { gid, hasIconUrl: !!iconUrl, iconBrandKey }, timestamp: Date.now() }) }).catch(() => {});
   // #endregion
 
   const { error } = await supabase.from("guilds").update(patch).eq("id", gid);
   if (error) {
     // #region agent log
-    fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4bd8e4' }, body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H1_icon_update_error', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:update:after', message: 'Guild icon patch failed', data: { gid, hasIconUrl: !!iconUrl, iconBrandKey, errorMessage: error?.message || null, errorDetails: error?.details || null }, timestamp: Date.now() }) }).catch(() => {});
+    fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H1_icon_update_error', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:update:after', message: 'Guild icon patch failed', data: { gid, hasIconUrl: !!iconUrl, iconBrandKey, errorMessage: error?.message || null, errorDetails: error?.details || null }, timestamp: Date.now() }) }).catch(() => {});
     // #endregion
     const col = /column|schema|icon_/i.test(`${error.message || ""} ${error.details || ""}`);
     return {
@@ -61,7 +61,7 @@ async function persistNewGuildIcons(gid, iconOpts) {
   }
 
   // #region agent log
-  fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4bd8e4' }, body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H2_icon_update_applied', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:update:after', message: 'Guild icon patch succeeded', data: { gid, hasIconUrl: !!iconUrl, iconBrandKey }, timestamp: Date.now() }) }).catch(() => {});
+  fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H2_icon_update_applied', location: 'client/src/hooks/usePrivateGuilds.js:persistNewGuildIcons:update:after', message: 'Guild icon patch succeeded', data: { gid, hasIconUrl: !!iconUrl, iconBrandKey }, timestamp: Date.now() }) }).catch(() => {});
   // #endregion
 
   return { ok: true };
@@ -184,7 +184,7 @@ export function usePrivateGuilds(enabled, userId) {
         if (gErr) throw gErr;
 
         // #region agent log
-        fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4bd8e4' }, body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H1_icon_persistence_after_reload', location: 'client/src/hooks/usePrivateGuilds.js:load:guildRows:iconSnapshot', message: 'Icon snapshot from guilds rows', data: { total: (guildRows || []).length, withIcons: (guildRows || []).filter((x) => x?.icon_url || x?.icon_brand_key).slice(0, 5).map((x) => ({ id: x.id, iconBrandKey: x.icon_brand_key ?? null, hasIconUrl: !!x.icon_url })) }, timestamp: Date.now() }) }).catch(() => {});
+        fetch('http://127.0.0.1:7417/ingest/f928b117-4eb1-4e9d-bfda-60aee881559e', { method: 'POST', body: JSON.stringify({ sessionId: '4bd8e4', runId: 'pre-icon-refresh', hypothesisId: 'H1_icon_persistence_after_reload', location: 'client/src/hooks/usePrivateGuilds.js:load:guildRows:iconSnapshot', message: 'Icon snapshot from guilds rows', data: { total: (guildRows || []).length, withIcons: (guildRows || []).filter((x) => x?.icon_url || x?.icon_brand_key).slice(0, 5).map((x) => ({ id: x.id, iconBrandKey: x.icon_brand_key ?? null, hasIconUrl: !!x.icon_url })) }, timestamp: Date.now() }) }).catch(() => {});
         // #endregion
 
         if (seq !== loadSeq.current) return;
