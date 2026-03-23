@@ -7,6 +7,7 @@ import { normalizeChannelList } from "./lib/channelList";
 import { IdentityModal } from "./components/IdentityModal";
 import { AuthModal } from "./components/AuthModal";
 import { Sidebar } from "./components/Sidebar";
+import { GuildServerRail } from "./components/GuildServerRail";
 import { ChatView } from "./components/ChatView";
 import { VoiceView } from "./components/VoiceView";
 import { UserBar } from "./components/UserBar";
@@ -540,6 +541,16 @@ export default function App() {
   return (
     <div className="flex h-[100dvh] flex-col bg-discord-bg">
       <div className="flex min-h-0 flex-1">
+        {useSupabaseAuth ? (
+          <GuildServerRail
+            activeGuildId={activeGuildId}
+            privateGuilds={privateGuildsList}
+            guildTablesMissing={guildTablesMissing}
+            onSelectPublicLobby={handleSelectPublicLobby}
+            onSelectPrivateGuild={handleSelectPrivateGuild}
+            onOpenCreateGuild={() => setCreateGuildOpen(true)}
+          />
+        ) : null}
         <Sidebar
           textChannels={textChannels}
           voiceChannels={voiceChannels}
@@ -564,11 +575,7 @@ export default function App() {
           serverSubtitle={serverSubtitle}
           activeGuildId={activeGuildId}
           myGuildRole={myGuildRole}
-          privateGuilds={privateGuildsList}
           incomingGuildInvites={guildIncomingInvites}
-          onSelectPublicLobby={handleSelectPublicLobby}
-          onSelectPrivateGuild={handleSelectPrivateGuild}
-          onOpenCreateGuild={() => setCreateGuildOpen(true)}
           onOpenManageGuild={() => setManageGuildOpen(true)}
           onAcceptGuildInvite={(id) => void handleAcceptGuildInvite(id)}
           onDeclineGuildInvite={(id) => void handleDeclineGuildInvite(id)}

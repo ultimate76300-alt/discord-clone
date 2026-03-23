@@ -37,30 +37,39 @@ export function usePrivateGuilds(enabled, userId) {
     setLoading(true);
     setError(null);
     try {
+      // Deux requêtes : l’embed PostgREST `guilds(...)` peut renvoyer null selon RLS / cache,
+      // ce qui vidait la liste côté client alors que les lignes guild_members existent.
       const { data: memberships, error: mErr } = await supabase
         .from("guild_members")
-        .select("role, guild_id, guilds(id, name, owner_id)")
+        .select("role, guild_id")
         .eq("user_id", userId);
       if (mErr) throw mErr;
       setGuildTablesMissing(false);
-      const list = (memberships || [])
-        .map((row) => {
-          const g = row.guilds;
-          if (!g?.id) return null;
-          return {
+
+      const guildIds = [...new Set((memberships || []).map((m) => m.guild_id).filter(Boolean))];
+      let list = [];
+      if (guildIds.length) {
+        const { data: guildRows, error: gErr } = await supabase
+          .from("guilds")
+          .select("id, name, owner_id")
+          .in("id", guildIds);
+        if (gErr) throw gErr;
+        const roleByGid = new Map((memberships || []).map((m) => [m.guild_id, m.role]));
+        list = (guildRows || [])
+          .map((g) => ({
             id: g.id,
             name: g.name || "Serveur",
             ownerId: g.owner_id,
-            myRole: row.role,
-          };
-        })
-        .filter(Boolean);
-      list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+            myRole: roleByGid.get(g.id) || "member",
+          }))
+          .filter((x) => x.id);
+        list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      }
       setGuilds(list);
 
       const { data: invites, error: iErr } = await supabase
         .from("guild_invites")
-        .select("id, guild_id, invited_by, guilds(name)")
+        .select("id, guild_id, invited_by")
         .eq("invitee_id", userId)
         .eq("status", "pending");
 
@@ -80,11 +89,23 @@ export function usePrivateGuilds(enabled, userId) {
           }
         }
 
+        const inviteGuildIds = [...new Set((invites || []).map((i) => i.guild_id).filter(Boolean))];
+        let guildNameById = new Map();
+        if (inviteGuildIds.length) {
+          const { data: igRows, error: igErr } = await supabase
+            .from("guilds")
+            .select("id, name")
+            .in("id", inviteGuildIds);
+          if (!igErr && igRows) {
+            guildNameById = new Map((igRows || []).map((g) => [g.id, g.name || "Serveur"]));
+          }
+        }
+
         setIncomingInvites(
           (invites || []).map((i) => ({
             id: i.id,
             guildId: i.guild_id,
-            guildName: i.guilds?.name || "Serveur",
+            guildName: guildNameById.get(i.guild_id) || "Serveur",
             inviterName: nameById.get(i.invited_by) || "Quelqu’un",
           }))
         );
@@ -93,8 +114,10 @@ export function usePrivateGuilds(enabled, userId) {
       const missing = isGuildTablesMissingError(e);
       setGuildTablesMissing(missing);
       setError(missing ? GUILD_SQL_SETUP_HINT : e?.message || "Erreur serveurs privés");
-      setGuilds([]);
-      setIncomingInvites([]);
+      if (missing) {
+        setGuilds([]);
+        setIncomingInvites([]);
+      }
     } finally {
       setLoading(false);
     }
